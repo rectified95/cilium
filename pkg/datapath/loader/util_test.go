@@ -14,7 +14,6 @@ import (
 	"github.com/cilium/cilium/pkg/datapath/linux/sysctl"
 	datapath "github.com/cilium/cilium/pkg/datapath/types"
 	"github.com/cilium/cilium/pkg/maps/callsmap"
-	"github.com/cilium/cilium/pkg/maps/policymap"
 	"github.com/cilium/cilium/pkg/option"
 )
 
@@ -43,7 +42,6 @@ func setupCompilationDirectories(tb testing.TB) {
 
 	oldElfMapPrefixes := elfMapPrefixes
 	elfMapPrefixes = []string{
-		fmt.Sprintf("test_%s", policymap.MapName),
 		fmt.Sprintf("test_%s", callsmap.MapName),
 	}
 
@@ -60,7 +58,6 @@ func newTestLoader(tb testing.TB) *loader {
 	setupCompilationDirectories(tb)
 
 	l := newLoader(Params{
-		Config: DefaultConfig,
 		Sysctl: sysctl.NewDirectSysctl(afero.NewOsFs(), "/proc"),
 	})
 	cw := configWriterForTest(tb)

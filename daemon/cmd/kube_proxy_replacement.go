@@ -129,13 +129,6 @@ func initKubeProxyReplacementOptions(sysctl sysctl.Sysctl, tunnelConfig tunnel.C
 		}
 
 		if option.Config.NodePortAcceleration != option.NodePortAccelerationDisabled &&
-			option.Config.NodePortAcceleration != option.NodePortAccelerationGeneric &&
-			option.Config.NodePortAcceleration != option.NodePortAccelerationNative &&
-			option.Config.NodePortAcceleration != option.NodePortAccelerationBestEffort {
-			return fmt.Errorf("Invalid value for --%s: %s", option.NodePortAcceleration, option.Config.NodePortAcceleration)
-		}
-
-		if option.Config.NodePortAcceleration != option.NodePortAccelerationDisabled &&
 			option.Config.EnableWireguard && option.Config.EncryptNode {
 			log.WithField(logfields.Hint,
 				"Disable XDP acceleration to encrypt N/S Loadbalancer traffic.").
@@ -389,12 +382,6 @@ func finishKubeProxyReplacementInit(sysctl sysctl.Sysctl, devices []*tables.Devi
 		}
 	}
 
-	if option.Config.NodePortAcceleration != option.NodePortAccelerationDisabled {
-		if err := setXDPMode(option.Config.NodePortAcceleration); err != nil {
-			return fmt.Errorf("Cannot set NodePort acceleration: %w", err)
-		}
-	}
-
 	option.Config.NodePortNat46X64 = option.Config.IsDualStack() &&
 		option.Config.DatapathMode == datapathOption.DatapathModeLBOnly &&
 		option.Config.NodePortMode == option.NodePortModeSNAT
@@ -423,7 +410,7 @@ func finishKubeProxyReplacementInit(sysctl sysctl.Sysctl, devices []*tables.Devi
 		// and the client IP is reachable via other device than the direct
 		// routing one.
 
-		if val, err := sysctl.Read(fmt.Sprintf("net.ipv4.conf.%s.rp_filter", directRoutingDevice)); err != nil {
+		if val, err := sysctl.Read([]string{"net", "ipv4", "conf", directRoutingDevice, "rp_filter"}); err != nil {
 			log.Warnf("Unable to read net.ipv4.conf.%s.rp_filter: %s. Ignoring the check",
 				directRoutingDevice, err)
 		} else {
@@ -519,7 +506,7 @@ func markHostExtension() {
 // Otherwise, if EnableAutoProtectNodePortRange == true, then append the nodeport
 // range to ip_local_reserved_ports.
 func checkNodePortAndEphemeralPortRanges(sysctl sysctl.Sysctl) error {
-	ephemeralPortRangeStr, err := sysctl.Read("net.ipv4.ip_local_port_range")
+	ephemeralPortRangeStr, err := sysctl.Read([]string{"net", "ipv4", "ip_local_port_range"})
 	if err != nil {
 		return fmt.Errorf("Unable to read net.ipv4.ip_local_port_range: %w", err)
 	}
@@ -551,7 +538,7 @@ func checkNodePortAndEphemeralPortRanges(sysctl sysctl.Sysctl) error {
 			nodePortRangeStr, ephemeralPortRangeStr)
 	}
 
-	reservedPortsStr, err := sysctl.Read("net.ipv4.ip_local_reserved_ports")
+	reservedPortsStr, err := sysctl.Read([]string{"net", "ipv4", "ip_local_reserved_ports"})
 	if err != nil {
 		return fmt.Errorf("Unable to read net.ipv4.ip_local_reserved_ports: %w", err)
 	}
@@ -597,34 +584,10 @@ func checkNodePortAndEphemeralPortRanges(sysctl sysctl.Sysctl) error {
 		reservedPortsStr += ","
 	}
 	reservedPortsStr += fmt.Sprintf("%d-%d", option.Config.NodePortMin, option.Config.NodePortMax)
-	if err := sysctl.Write("net.ipv4.ip_local_reserved_ports", reservedPortsStr); err != nil {
+	if err := sysctl.Write([]string{"net", "ipv4", "ip_local_reserved_ports"}, reservedPortsStr); err != nil {
 		return fmt.Errorf("Unable to addend nodeport range (%s) to net.ipv4.ip_local_reserved_ports: %w",
 			nodePortRangeStr, err)
 	}
 
-	return nil
-}
-
-func setXDPMode(mode string) error {
-	switch mode {
-	case option.XDPModeNative, option.XDPModeBestEffort:
-		if option.Config.XDPMode == option.XDPModeLinkNone ||
-			option.Config.XDPMode == option.XDPModeLinkDriver {
-			option.Config.XDPMode = option.XDPModeLinkDriver
-		} else {
-			return fmt.Errorf("XDP Mode conflict: current mode is %s, trying to set conflicting %s",
-				option.Config.XDPMode, option.XDPModeLinkDriver)
-		}
-	case option.XDPModeGeneric:
-		if option.Config.XDPMode == option.XDPModeLinkNone ||
-			option.Config.XDPMode == option.XDPModeLinkGeneric {
-			option.Config.XDPMode = option.XDPModeLinkGeneric
-		} else {
-			return fmt.Errorf("XDP Mode conflict: current mode is %s, trying to set conflicting %s",
-				option.Config.XDPMode, option.XDPModeLinkGeneric)
-		}
-	case option.XDPModeDisabled:
-		break
-	}
 	return nil
 }

@@ -19,7 +19,7 @@ cilium-agent [flags]
       --allow-icmp-frag-needed                                    Allow ICMP Fragmentation Needed type packets for purposes like TCP Path MTU. (default true)
       --allow-localhost string                                    Policy when to allow local stack to reach local endpoints { auto | always | policy } (default "auto")
       --annotate-k8s-node                                         Annotate Kubernetes node
-      --api-rate-limit stringToString                             API rate limiting configuration (example: --api-rate-limit endpoint-create=rate-limit:10/m,rate-burst:2) (default [])
+      --api-rate-limit string                                     API rate limiting configuration (example: --api-rate-limit endpoint-create=rate-limit:10/m,rate-burst:2)
       --arping-refresh-period duration                            Period for remote node ARP entry refresh (set 0 to disable) (default 30s)
       --auto-create-cilium-node-resource                          Automatically create CiliumNode resource for own node on startup (default true)
       --auto-direct-node-routes                                   Enable automatic L2 routing between nodes
@@ -49,6 +49,7 @@ cilium-agent [flags]
       --bpf-lb-maglev-table-size uint                             Maglev per service backend table size (parameter M) (default 16381)
       --bpf-lb-map-max int                                        Maximum number of entries in Cilium BPF lbmap (default 65536)
       --bpf-lb-mode string                                        BPF load balancing mode ("snat", "dsr", "hybrid") (default "snat")
+      --bpf-lb-proto-diff                                         Enable support for service protocol differentiation (TCP, UDP, SCTP) (default true)
       --bpf-lb-rss-ipv4-src-cidr string                           BPF load balancing RSS outer source IPv4 CIDR prefix for IPIP
       --bpf-lb-rss-ipv6-src-cidr string                           BPF load balancing RSS outer source IPv6 CIDR prefix for IPIP
       --bpf-lb-sock                                               Enable socket-based LB for E/W traffic
@@ -111,6 +112,7 @@ cilium-agent [flags]
       --enable-cilium-endpoint-slice                              Enable the CiliumEndpointSlice watcher in place of the CiliumEndpoint watcher (beta)
       --enable-cilium-health-api-server-access strings            List of cilium health API APIs which are administratively enabled. Supports '*'. (default [*])
       --enable-custom-calls                                       Enable tail call hooks for custom eBPF programs
+      --enable-dynamic-config                                     Enables support for dynamic agent config
       --enable-encryption-strict-mode                             Enable encryption strict mode
       --enable-endpoint-health-checking                           Enable connectivity health checking between virtual endpoints (default true)
       --enable-endpoint-routes                                    Use per endpoint routes instead of routing via cilium_host

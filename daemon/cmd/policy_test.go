@@ -33,7 +33,6 @@ import (
 	slim_metav1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/apis/meta/v1"
 	"github.com/cilium/cilium/pkg/k8s/types"
 	"github.com/cilium/cilium/pkg/labels"
-	"github.com/cilium/cilium/pkg/logging"
 	"github.com/cilium/cilium/pkg/metrics"
 	"github.com/cilium/cilium/pkg/policy"
 	"github.com/cilium/cilium/pkg/policy/api"
@@ -244,11 +243,6 @@ func (ds *DaemonSuite) regenerateEndpoint(t *testing.T, e *endpoint.Endpoint) {
 	require.Equal(t, true, buildSuccess)
 }
 
-func TestUpdateConsumerMapConsul(t *testing.T) {
-	ds := setupDaemonConsulSuite(t)
-	ds.testUpdateConsumerMap(t)
-}
-
 func TestUpdateConsumerMapEtcd(t *testing.T) {
 	ds := setupDaemonEtcdSuite(t)
 	ds.testUpdateConsumerMap(t)
@@ -447,11 +441,6 @@ func (ds *DaemonSuite) testUpdateConsumerMap(t *testing.T) {
 	require.Equal(t, expectedNetworkPolicy, prodBarNetworkPolicy)
 }
 
-func TestL4L7ShadowingConsul(t *testing.T) {
-	ds := setupDaemonConsulSuite(t)
-	ds.testL4L7Shadowing(t)
-}
-
 func TestL4L7ShadowingEtcd(t *testing.T) {
 	ds := setupDaemonEtcdSuite(t)
 	ds.testL4L7Shadowing(t)
@@ -540,11 +529,6 @@ func (ds *DaemonSuite) testL4L7Shadowing(t *testing.T) {
 	require.Equal(t, expectedNetworkPolicy, qaBarNetworkPolicy)
 }
 
-func TestL4L7ShadowingShortCircuitConsul(t *testing.T) {
-	ds := setupDaemonConsulSuite(t)
-	ds.testL4L7ShadowingShortCircuit(t)
-}
-
 func TestL4L7ShadowingShortCircuitEtcd(t *testing.T) {
 	ds := setupDaemonEtcdSuite(t)
 	ds.testL4L7ShadowingShortCircuit(t)
@@ -630,20 +614,12 @@ func (ds *DaemonSuite) testL4L7ShadowingShortCircuit(t *testing.T) {
 	require.Equal(t, expectedNetworkPolicy, qaBarNetworkPolicy)
 }
 
-func TestL3DependentL7Consul(t *testing.T) {
-	ds := setupDaemonConsulSuite(t)
-	ds.testL3DependentL7(t)
-}
-
 func TestL3DependentL7Etcd(t *testing.T) {
 	ds := setupDaemonEtcdSuite(t)
 	ds.testL3DependentL7(t)
 }
 
 func (ds *DaemonSuite) testL3DependentL7(t *testing.T) {
-	logging.SetLogLevelToDebug()
-	defer logging.SetDefaultLogLevel()
-
 	// Prepare the identities necessary for testing
 	qaBarLbls := labels.Labels{lblBar.Key: lblBar, lblQA.Key: lblQA}
 	qaBarSecLblsCtx, _, err := ds.d.identityAllocator.AllocateIdentity(context.Background(), qaBarLbls, true, identity.InvalidIdentity)
@@ -744,11 +720,6 @@ func (ds *DaemonSuite) testL3DependentL7(t *testing.T) {
 	require.Equal(t, expectedNetworkPolicy, qaBarNetworkPolicy)
 }
 
-func TestReplacePolicyConsul(t *testing.T) {
-	ds := setupDaemonConsulSuite(t)
-	ds.testReplacePolicy(t)
-}
-
 func TestReplacePolicyEtcd(t *testing.T) {
 	ds := setupDaemonEtcdSuite(t)
 	ds.testReplacePolicy(t)
@@ -801,11 +772,6 @@ func (ds *DaemonSuite) testReplacePolicy(t *testing.T) {
 	ds.d.policy.Mutex.RLock()
 	require.Equal(t, 2, len(ds.d.policy.SearchRLocked(lbls)))
 	ds.d.policy.Mutex.RUnlock()
-}
-
-func TestRemovePolicyConsul(t *testing.T) {
-	ds := setupDaemonConsulSuite(t)
-	ds.testRemovePolicy(t)
 }
 
 func TestRemovePolicyEtcd(t *testing.T) {
@@ -899,11 +865,6 @@ func (ds *DaemonSuite) testRemovePolicy(t *testing.T) {
 	// Check that the policy has been removed from the xDS cache.
 	networkPolicies = ds.getXDSNetworkPolicies(t, nil)
 	require.Len(t, networkPolicies, 0)
-}
-
-func TestIncrementalPolicyConsul(t *testing.T) {
-	ds := setupDaemonConsulSuite(t)
-	ds.testIncrementalPolicy(t)
 }
 
 func TestIncrementalPolicyEtcd(t *testing.T) {
@@ -1060,11 +1021,6 @@ func (ds *DaemonSuite) testIncrementalPolicy(t *testing.T) {
 	// Check that the policy has been removed from the xDS cache.
 	networkPolicies = ds.getXDSNetworkPolicies(t, nil)
 	require.Len(t, networkPolicies, 0)
-}
-
-func TestAddCiliumNetworkPolicyV2Consul(t *testing.T) {
-	ds := setupDaemonConsulSuite(t)
-	ds.testAddCiliumNetworkPolicyV2(t)
 }
 
 func TestAddCiliumNetworkPolicyV2Etcd(t *testing.T) {

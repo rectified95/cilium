@@ -15,12 +15,13 @@ import (
 	"github.com/cilium/hive/job"
 	"github.com/cilium/statedb"
 	"github.com/cilium/stream"
+	"github.com/spf13/pflag"
 
-	"github.com/cilium/cilium/pkg/datapath/iptables"
 	"github.com/cilium/cilium/pkg/datapath/loader/metrics"
 	"github.com/cilium/cilium/pkg/datapath/tables"
 	"github.com/cilium/cilium/pkg/datapath/tunnel"
-	"github.com/cilium/cilium/pkg/datapath/types"
+	datapath "github.com/cilium/cilium/pkg/datapath/types"
+	"github.com/cilium/cilium/pkg/datapath/xdp"
 	"github.com/cilium/cilium/pkg/endpoint/regeneration"
 	"github.com/cilium/cilium/pkg/endpointmanager"
 	"github.com/cilium/cilium/pkg/inctimer"
@@ -43,13 +44,36 @@ const (
 	reinitRetryDuration = 10 * time.Second
 )
 
+var DefaultConfig = Config{
+	// By default the masquerading IP is the primary IP address of the device in
+	// question.
+	DeriveMasqIPAddrFromDevice: "",
+}
+
+type Config struct {
+	// DeriveMasqIPAddrFromDevice specifies which device's IP addr is used for BPF masquerade.
+	// This is a hidden option and by default not set. Only needed in very specific setups
+	// with ECMP and multiple devices.
+	// See commit d204d789746b1389cc2ba02fdd55b81a2f55b76e for original context.
+	// This can be removed once https://github.com/cilium/cilium/issues/17158 is resolved.
+	DeriveMasqIPAddrFromDevice string
+}
+
+func (def Config) Flags(flags *pflag.FlagSet) {
+	const deriveFlag = "derive-masq-ip-addr-from-device"
+	flags.String(
+		deriveFlag, def.DeriveMasqIPAddrFromDevice,
+		"Device name from which Cilium derives the IP addr for BPF masquerade")
+	flags.MarkHidden(deriveFlag)
+}
+
 type orchestrator struct {
 	params orchestratorParams
 
 	initDone              bool
 	dpInitialized         chan struct{}
 	trigger               chan reinitializeRequest
-	latestLocalNodeConfig atomic.Pointer[types.LocalNodeConfiguration]
+	latestLocalNodeConfig atomic.Pointer[datapath.LocalNodeConfiguration]
 }
 
 type reinitializeRequest struct {
@@ -60,11 +84,12 @@ type reinitializeRequest struct {
 type orchestratorParams struct {
 	cell.In
 
+	Config              Config
 	Log                 *slog.Logger
-	Loader              types.Loader
+	Loader              datapath.Loader
 	TunnelConfig        tunnel.Config
 	MTU                 mtu.MTU
-	IPTablesManager     *iptables.Manager
+	IPTablesManager     datapath.IptablesManager
 	Proxy               *proxy.Proxy
 	DB                  *statedb.DB
 	Devices             statedb.Table[*tables.Device]
@@ -77,6 +102,7 @@ type orchestratorParams struct {
 	Lifecycle           cell.Lifecycle
 	EndpointManager     endpointmanager.EndpointManager
 	ConfigPromise       promise.Promise[*option.DaemonConfig]
+	XDPConfig           xdp.Config
 }
 
 func newOrchestrator(params orchestratorParams) *orchestrator {
@@ -160,6 +186,8 @@ func (o *orchestrator) reconciler(ctx context.Context, health cell.Health) error
 			o.params.DirectRoutingDevice,
 			o.params.Devices,
 			o.params.NodeAddresses,
+			o.params.Config.DeriveMasqIPAddrFromDevice,
+			o.params.XDPConfig,
 		)
 		if err != nil {
 			health.Degraded("failed to get local node configuration", err)
@@ -214,7 +242,7 @@ func (o *orchestrator) Reinitialize(ctx context.Context) error {
 	return <-errChan
 }
 
-func (o *orchestrator) reinitialize(ctx context.Context, req reinitializeRequest, localNodeConfig *types.LocalNodeConfiguration) error {
+func (o *orchestrator) reinitialize(ctx context.Context, req reinitializeRequest, localNodeConfig *datapath.LocalNodeConfiguration) error {
 	if req.ctx != nil {
 		ctx = req.ctx
 	}
@@ -263,7 +291,7 @@ func (o *orchestrator) reinitialize(ctx context.Context, req reinitializeRequest
 	return err
 }
 
-func (o *orchestrator) ReloadDatapath(ctx context.Context, ep types.Endpoint, stats *metrics.SpanStat) (string, error) {
+func (o *orchestrator) ReloadDatapath(ctx context.Context, ep datapath.Endpoint, stats *metrics.SpanStat) (string, error) {
 	select {
 	case <-o.dpInitialized:
 	case <-ctx.Done():
@@ -283,17 +311,17 @@ func (o *orchestrator) ReinitializeXDP(ctx context.Context, extraCArgs []string)
 	return o.params.Loader.ReinitializeXDP(ctx, o.latestLocalNodeConfig.Load(), extraCArgs)
 }
 
-func (o *orchestrator) EndpointHash(cfg types.EndpointConfiguration) (string, error) {
+func (o *orchestrator) EndpointHash(cfg datapath.EndpointConfiguration) (string, error) {
 	<-o.dpInitialized
 	return o.params.Loader.EndpointHash(cfg, o.latestLocalNodeConfig.Load())
 }
 
-func (o *orchestrator) Unload(ep types.Endpoint) {
+func (o *orchestrator) Unload(ep datapath.Endpoint) {
 	<-o.dpInitialized
 	o.params.Loader.Unload(ep)
 }
 
-func (o *orchestrator) WriteEndpointConfig(w io.Writer, cfg types.EndpointConfiguration) error {
+func (o *orchestrator) WriteEndpointConfig(w io.Writer, cfg datapath.EndpointConfiguration) error {
 	<-o.dpInitialized
 	return o.params.Loader.WriteEndpointConfig(w, cfg, o.latestLocalNodeConfig.Load())
 }

@@ -42,7 +42,6 @@
 #include "lib/l4.h"
 #include "lib/drop.h"
 #include "lib/encap.h"
-#include "lib/encrypt.h"
 #include "lib/nat.h"
 #include "lib/lb.h"
 #include "lib/nodeport.h"
@@ -285,7 +284,7 @@ handle_ipv6_cont(struct __ctx_buff *ctx, __u32 secctx, const bool from_host,
 			ret = __ipv6_host_policy_ingress(ctx, ip6, ct_buffer, &remote_id, &trace,
 							 ext_err);
 		}
-		if (IS_ERR(ret))
+		if (IS_ERR(ret) || ret == CTX_ACT_REDIRECT)
 			return ret;
 	}
 #endif /* ENABLE_HOST_FIREWALL */
@@ -716,7 +715,7 @@ handle_ipv4_cont(struct __ctx_buff *ctx, __u32 secctx, const bool from_host,
 			ret = __ipv4_host_policy_ingress(ctx, ip4, ct_buffer, &remote_id, &trace,
 							 ext_err);
 		}
-		if (IS_ERR(ret))
+		if (IS_ERR(ret) || ret == CTX_ACT_REDIRECT)
 			return ret;
 	}
 #endif /* ENABLE_HOST_FIREWALL */
@@ -1426,6 +1425,9 @@ int cil_to_netdev(struct __ctx_buff *ctx __maybe_unused)
 		break;
 	}
 
+	if (ret == CTX_ACT_REDIRECT)
+		return ret;
+
 	if (IS_ERR(ret))
 		goto drop_err;
 
@@ -1586,7 +1588,7 @@ skip_egress_gateway:
 		 * handle_nat_fwd tail calls in the majority of cases,
 		 * so control might never return to this program.
 		 */
-		ret = handle_nat_fwd(ctx, 0, proto, &trace, &ext_err);
+		ret = handle_nat_fwd(ctx, 0, proto, false, &trace, &ext_err);
 		if (ret == CTX_ACT_REDIRECT)
 			return ret;
 	}
@@ -1651,7 +1653,26 @@ int cil_to_host(struct __ctx_buff *ctx)
 	 * to mark as PACKET_OTHERHOST and drop.
 	 */
 	ctx_change_type(ctx, PACKET_HOST);
-#endif
+
+# ifdef ENABLE_NODEPORT
+	if ((ctx->mark & MARK_MAGIC_HOST_MASK) != MARK_MAGIC_ENCRYPT)
+		goto skip_ipsec_nodeport_revdnat;
+
+	if (!validate_ethertype(ctx, &proto))
+		goto skip_ipsec_nodeport_revdnat;
+
+	/* handle_nat_fwd() tail calls in the majority of cases, so control
+	 * might never return to this program. Since IPsec is not compatible
+	 * iwth Host Firewall, this won't be an issue.
+	 */
+	ret = handle_nat_fwd(ctx, 0, proto, true, &trace, &ext_err);
+	if (IS_ERR(ret))
+		goto out;
+
+skip_ipsec_nodeport_revdnat:
+# endif /* ENABLE_NODEPORT */
+
+#endif /* ENABLE_IPSEC */
 #ifdef ENABLE_HOST_FIREWALL
 	if (!validate_ethertype(ctx, &proto)) {
 		ret = DROP_UNSUPPORTED_L2;
@@ -1871,15 +1892,17 @@ from_host_to_lxc(struct __ctx_buff *ctx, __s8 *ext_err)
 
 	return ret;
 }
+#endif /* ENABLE_HOST_FIREWALL */
 
 /* When per-endpoint routes are enabled, packets to and from local endpoints
  * will tail call into this program to enforce egress and ingress host policies.
  * Packets to the local endpoints will then tail call back to the original
  * bpf_lxc program.
  */
-__section_tail(CILIUM_MAP_POLICY, TEMPLATE_HOST_EP_ID)
-int handle_lxc_traffic(struct __ctx_buff *ctx)
+__section_entry
+int handle_lxc_traffic(struct __ctx_buff *ctx __maybe_unused)
 {
+#ifdef ENABLE_HOST_FIREWALL
 	bool from_host = ctx_load_meta(ctx, CB_FROM_HOST);
 	__u32 lxc_id;
 	int ret;
@@ -1899,7 +1922,9 @@ int handle_lxc_traffic(struct __ctx_buff *ctx)
 	}
 
 	return to_host_from_lxc(ctx);
-}
+#else
+	return 0;
 #endif /* ENABLE_HOST_FIREWALL */
+}
 
 BPF_LICENSE("Dual BSD/GPL");

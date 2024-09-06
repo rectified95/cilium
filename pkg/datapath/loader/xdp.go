@@ -17,16 +17,17 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/cilium/cilium/pkg/bpf"
+	"github.com/cilium/cilium/pkg/datapath/xdp"
 	"github.com/cilium/cilium/pkg/identity"
 	"github.com/cilium/cilium/pkg/mac"
 	"github.com/cilium/cilium/pkg/option"
 )
 
-func xdpConfigModeToFlag(xdpMode string) link.XDPAttachFlags {
+func xdpConfigModeToFlag(xdpMode xdp.Mode) link.XDPAttachFlags {
 	switch xdpMode {
-	case option.XDPModeNative, option.XDPModeLinkDriver, option.XDPModeBestEffort:
+	case xdp.ModeLinkDriver:
 		return link.XDPDriverMode
-	case option.XDPModeGeneric, option.XDPModeLinkGeneric:
+	case xdp.ModeLinkGeneric:
 		return link.XDPGenericMode
 	}
 	return 0
@@ -58,7 +59,7 @@ func xdpAttachedModeToFlag(mode uint32) link.XDPAttachFlags {
 //
 // bpffsBase is typically set to /sys/fs/bpf/cilium, but can be a temp directory
 // during tests.
-func (l *loader) maybeUnloadObsoleteXDPPrograms(xdpDevs []string, xdpMode, bpffsBase string) {
+func maybeUnloadObsoleteXDPPrograms(xdpDevs []string, xdpMode xdp.Mode, bpffsBase string) {
 	links, err := netlink.LinkList()
 	if err != nil {
 		log.WithError(err).Warn("Failed to list links for XDP unload")
@@ -86,7 +87,7 @@ func (l *loader) maybeUnloadObsoleteXDPPrograms(xdpDevs []string, xdpMode, bpffs
 			}
 		}
 		if !used {
-			if err := l.DetachXDP(link.Attrs().Name, bpffsBase, symbolFromHostNetdevXDP); err != nil {
+			if err := DetachXDP(link.Attrs().Name, bpffsBase, symbolFromHostNetdevXDP); err != nil {
 				log.WithError(err).Warn("Failed to detach obsolete XDP program")
 			}
 		}
@@ -125,7 +126,7 @@ func xdpCompileArgs(xdpDev string, extraCArgs []string) ([]string, error) {
 }
 
 // compileAndLoadXDPProg compiles bpf_xdp.c for the given XDP device and loads it.
-func compileAndLoadXDPProg(ctx context.Context, xdpDev, xdpMode string, extraCArgs []string) error {
+func compileAndLoadXDPProg(ctx context.Context, xdpDev string, xdpMode xdp.Mode, extraCArgs []string) error {
 	args, err := xdpCompileArgs(xdpDev, extraCArgs)
 	if err != nil {
 		return fmt.Errorf("failed to derive XDP compile extra args: %w", err)
@@ -162,13 +163,18 @@ func compileAndLoadXDPProg(ctx context.Context, xdpDev, xdpMode string, extraCAr
 		return fmt.Errorf("loading eBPF ELF %s: %w", objPath, err)
 	}
 
-	coll, commit, err := loadDatapath(spec, nil, nil)
+	var obj xdpObjects
+	commit, err := bpf.LoadAndAssign(&obj, spec, &bpf.CollectionOptions{
+		CollectionOptions: ebpf.CollectionOptions{
+			Maps: ebpf.MapOptions{PinPath: bpf.TCGlobalsPath()},
+		},
+	})
 	if err != nil {
 		return err
 	}
-	defer coll.Close()
+	defer obj.Close()
 
-	if err := attachXDPProgram(iface, coll.Programs[symbolFromHostNetdevXDP], symbolFromHostNetdevXDP,
+	if err := attachXDPProgram(iface, obj.Entrypoint, symbolFromHostNetdevXDP,
 		bpffsDeviceLinksDir(bpf.CiliumPath(), iface), xdpConfigModeToFlag(xdpMode)); err != nil {
 		return fmt.Errorf("interface %s: %w", xdpDev, err)
 	}
@@ -278,7 +284,7 @@ func attachXDPProgram(iface netlink.Link, prog *ebpf.Program, progName, bpffsDir
 //
 // bpffsBase is typically /sys/fs/bpf/cilium, but can be overridden to a tempdir
 // during tests.
-func (l *loader) DetachXDP(ifaceName string, bpffsBase, progName string) error {
+func DetachXDP(ifaceName string, bpffsBase, progName string) error {
 	iface, err := netlink.LinkByName(ifaceName)
 	if err != nil {
 		return fmt.Errorf("getting link '%s' by name: %w", ifaceName, err)

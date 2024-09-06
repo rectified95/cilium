@@ -21,6 +21,7 @@ import (
 	"github.com/mattn/go-shellwords"
 	"github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
+	"k8s.io/utils/clock"
 
 	"github.com/cilium/cilium/daemon/cmd/cni"
 	"github.com/cilium/cilium/pkg/byteorder"
@@ -32,6 +33,7 @@ import (
 	"github.com/cilium/cilium/pkg/datapath/linux/route"
 	"github.com/cilium/cilium/pkg/datapath/linux/sysctl"
 	"github.com/cilium/cilium/pkg/datapath/tables"
+	datapath "github.com/cilium/cilium/pkg/datapath/types"
 	"github.com/cilium/cilium/pkg/defaults"
 	"github.com/cilium/cilium/pkg/fqdn/proxy/ipfamily"
 	ipamOption "github.com/cilium/cilium/pkg/ipam/option"
@@ -264,6 +266,7 @@ type Manager struct {
 }
 
 type reconcilerParams struct {
+	clock          clock.WithTicker
 	localNodeStore *node.LocalNodeStore
 	db             *statedb.DB
 	devices        statedb.Table[*tables.Device]
@@ -291,7 +294,7 @@ type params struct {
 	Devices  statedb.Table[*tables.Device]
 }
 
-func newIptablesManager(p params) *Manager {
+func newIptablesManager(p params) datapath.IptablesManager {
 	iptMgr := &Manager{
 		logger:     p.Logger,
 		modulesMgr: p.ModulesMgr,
@@ -299,6 +302,7 @@ func newIptablesManager(p params) *Manager {
 		cfg:        p.Cfg,
 		sharedCfg:  p.SharedCfg,
 		reconcilerParams: reconcilerParams{
+			clock:          clock.RealClock{},
 			localNodeStore: p.LocalNodeStore,
 			db:             p.DB,
 			devices:        p.Devices,
@@ -438,7 +442,7 @@ func (m *Manager) disableIPEarlyDemux() {
 		return
 	}
 
-	disabled := m.sysctl.Disable("net.ipv4.ip_early_demux") == nil
+	disabled := m.sysctl.Disable([]string{"net", "ipv4", "ip_early_demux"}) == nil
 	if disabled {
 		m.ipEarlyDemuxDisabled = true
 		m.logger.Info("Disabled ip_early_demux to allow proxy redirection with original source/destination address without xt_socket support also in non-tunneled datapath modes.")
@@ -503,6 +507,8 @@ func (m *Manager) inboundProxyRedirectRule(cmd string) []string {
 	// 1. route return traffic to the proxy
 	// 2. route original direction traffic that would otherwise be intercepted
 	//    by ip_early_demux
+	// Explicitly support chaining Envoy listeners via the loopback device by
+	// excluding traffic for the loopback device.
 	toProxyMark := fmt.Sprintf("%#08x", linux_defaults.MagicMarkIsToProxy)
 	matchFromIPSecEncrypt := fmt.Sprintf("%#08x/%#08x", linux_defaults.RouteMarkEncrypt, linux_defaults.RouteMarkMask)
 	matchProxyToWorld := fmt.Sprintf("%#08x/%#08x", linux_defaults.MarkProxyToWorld, linux_defaults.RouteMarkMask)
@@ -510,6 +516,7 @@ func (m *Manager) inboundProxyRedirectRule(cmd string) []string {
 		"-t", "mangle",
 		cmd, ciliumPreMangleChain,
 		"-m", "socket", "--transparent",
+		"!", "-o", "lo",
 		"-m", "mark", "!", "--mark", matchFromIPSecEncrypt,
 		"-m", "mark", "!", "--mark", matchProxyToWorld,
 		"-m", "comment", "--comment", "cilium: any->pod redirect proxied traffic to host proxy",

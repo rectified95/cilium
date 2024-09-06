@@ -653,6 +653,7 @@ enum {
 #define DROP_MULTICAST_HANDLED  -201
 #define DROP_HOST_NOT_READY	-202
 #define DROP_EP_NOT_READY	-203
+#define DROP_NO_EGRESS_IP	-204
 
 #define NAT_PUNT_TO_STACK	DROP_NAT_NOT_NEEDED
 #define NAT_NEEDED		CTX_ACT_OK
@@ -800,6 +801,8 @@ static __always_inline __u32 or_encrypt_key(__u8 key)
 #define TC_INDEX_F_UNUSED		8
 #define TC_INDEX_F_SKIP_HOST_FIREWALL	16
 
+#define CB_NAT_FLAGS_REVDNAT_ONLY	(1 << 0)
+
 /*
  * For use in ctx_{load,store}_meta(), which operates on sk_buff->cb or
  * the cilium_xdp_scratch pad.
@@ -833,6 +836,7 @@ enum {
 #define	CB_CLUSTER_ID_INGRESS	CB_POLICY	/* Alias, non-overlapping */
 #define CB_HSIPC_PORT		CB_POLICY	/* Alias, non-overlapping */
 #define CB_DSR_SRC_LABEL	CB_POLICY	/* Alias, non-overlapping */
+#define CB_NAT_FLAGS		CB_POLICY	/* Alias, non-overlapping */
 	CB_3,
 #define	CB_ADDR_V6_3		CB_3		/* Alias, non-overlapping */
 #define	CB_FROM_HOST		CB_3		/* Alias, non-overlapping */
@@ -983,7 +987,7 @@ struct lb6_key {
 	union v6addr address;	/* Service virtual IPv6 address */
 	__be16 dport;		/* L4 port filter, if unset, all ports apply */
 	__u16 backend_slot;	/* Backend iterator, 0 indicates the svc frontend */
-	__u8 proto;		/* L4 protocol, currently not used (set to 0) */
+	__u8 proto;		/* L4 protocol, 0 indicates any protocol */
 	__u8 scope;		/* LB_LOOKUP_SCOPE_* for externalTrafficPolicy=Local */
 	__u8 pad[2];
 };
@@ -1045,7 +1049,7 @@ struct lb4_key {
 	__be32 address;		/* Service virtual IPv4 address */
 	__be16 dport;		/* L4 port filter, if unset, all ports apply */
 	__u16 backend_slot;	/* Backend iterator, 0 indicates the svc frontend */
-	__u8 proto;		/* L4 protocol, currently not used (set to 0) */
+	__u8 proto;		/* L4 protocol, 0 indicates any protocol */
 	__u8 scope;		/* LB_LOOKUP_SCOPE_* for externalTrafficPolicy=Local */
 	__u8 pad[2];
 };

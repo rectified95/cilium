@@ -62,6 +62,7 @@ import (
 	"github.com/cilium/cilium/pkg/hubble/exporter/exporteroption"
 	"github.com/cilium/cilium/pkg/hubble/observer/observeroption"
 	"github.com/cilium/cilium/pkg/identity"
+	identitycell "github.com/cilium/cilium/pkg/identity/cache/cell"
 	"github.com/cilium/cilium/pkg/identity/identitymanager"
 	"github.com/cilium/cilium/pkg/ipam"
 	ipamOption "github.com/cilium/cilium/pkg/ipam/option"
@@ -606,6 +607,9 @@ func InitGlobalFlags(cmd *cobra.Command, vp *viper.Viper) {
 		"BPF load balancing acceleration via XDP (\"%s\", \"%s\")",
 		option.NodePortAccelerationNative, option.NodePortAccelerationDisabled))
 	option.BindEnv(vp, option.LoadBalancerAcceleration)
+
+	flags.Bool(option.LoadBalancerProtocolDifferentiation, true, "Enable support for service protocol differentiation (TCP, UDP, SCTP)")
+	option.BindEnv(vp, option.LoadBalancerProtocolDifferentiation)
 
 	flags.Uint(option.MaglevTableSize, maglev.DefaultTableSize, "Maglev per service backend table size (parameter M)")
 	option.BindEnv(vp, option.MaglevTableSize)
@@ -1650,7 +1654,6 @@ type daemonParams struct {
 	Lifecycle              cell.Lifecycle
 	Health                 cell.Health
 	Clientset              k8sClient.Clientset
-	Datapath               datapath.Datapath
 	Loader                 datapath.Loader
 	WGAgent                *wireguard.Agent
 	LocalNodeStore         *node.LocalNodeStore
@@ -1662,10 +1665,13 @@ type daemonParams struct {
 	K8sResourceSynced      *k8sSynced.Resources
 	K8sAPIGroups           *k8sSynced.APIGroups
 	NodeManager            nodeManager.NodeManager
+	NodeHandler            datapath.NodeHandler
+	NodeNeighbors          datapath.NodeNeighbors
+	NodeAddressing         datapath.NodeAddressing
 	EndpointManager        endpointmanager.EndpointManager
 	CertManager            certificatemanager.CertificateManager
 	SecretManager          certificatemanager.SecretManager
-	IdentityAllocator      CachingIdentityAllocator
+	IdentityAllocator      identitycell.CachingIdentityAllocator
 	Policy                 *policy.Repository
 	IPCache                *ipcache.IPCache
 	DirectoryPolicyWatcher *policyDirectory.PolicyResourcesWatcher
@@ -1710,6 +1716,8 @@ type daemonParams struct {
 	IPAM                *ipam.IPAM
 	CRDSyncPromise      promise.Promise[k8sSynced.CRDSync]
 	IdentityManager     *identitymanager.IdentityManager
+	Orchestrator        datapath.Orchestrator
+	IPTablesManager     datapath.IptablesManager
 }
 
 func newDaemonPromise(params daemonParams) (promise.Promise[*Daemon], promise.Promise[policyK8s.PolicyManager]) {
@@ -1841,6 +1849,14 @@ func startDaemon(d *Daemon, restoredEndpoints *endpointRestoreState, cleaner *da
 				return
 			}
 
+			// When running in KVStore mode, we need to additionally wait until
+			// we have discovered all remote IP addresses, to prevent triggering
+			// the collection of stale AllowedIPs entries too early, leading to
+			// the disruption of otherwise valid long running connections.
+			if option.Config.KVStore != "" {
+				ipcache.WaitForKVStoreSync()
+			}
+
 			if err := params.WGAgent.RestoreFinished(d.clustermesh); err != nil {
 				log.WithError(err).Error("Failed to set up WireGuard peers")
 			}
@@ -1955,19 +1971,19 @@ func startDaemon(d *Daemon, restoredEndpoints *endpointRestoreState, cleaner *da
 	}
 
 	// Watches for node neighbors link updates.
-	d.nodeDiscovery.Manager.StartNodeNeighborLinkUpdater(d.datapath.NodeNeighbors())
+	d.nodeDiscovery.Manager.StartNodeNeighborLinkUpdater(params.NodeNeighbors)
 
 	if option.Config.DatapathMode != datapathOption.DatapathModeLBOnly {
-		if !d.datapath.NodeNeighbors().NodeNeighDiscoveryEnabled() {
+		if !params.NodeNeighbors.NodeNeighDiscoveryEnabled() {
 			// Remove all non-GC'ed neighbor entries that might have previously set
 			// by a Cilium instance.
-			d.datapath.NodeNeighbors().NodeCleanNeighbors(false)
+			params.NodeNeighbors.NodeCleanNeighbors(false)
 		} else {
 			// If we came from an agent upgrade, migrate entries.
-			d.datapath.NodeNeighbors().NodeCleanNeighbors(true)
+			params.NodeNeighbors.NodeCleanNeighbors(true)
 			// Start periodical refresh of the neighbor table from the agent if needed.
 			if option.Config.ARPPingRefreshPeriod != 0 && !option.Config.ARPPingKernelManaged {
-				d.nodeDiscovery.Manager.StartNeighborRefresh(d.datapath.NodeNeighbors())
+				d.nodeDiscovery.Manager.StartNeighborRefresh(params.NodeNeighbors)
 			}
 		}
 	}

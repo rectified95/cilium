@@ -465,7 +465,6 @@ func (r *cecResourceParser) parseResources(cecNamespace string, cecName string, 
 				return envoy.Resources{}, fmt.Errorf("ParseResources: Cluster refers to missing internal listener %q (%w): %s", cluster.Name, err, cluster.String())
 			}
 		}
-
 	}
 	for _, endpoints := range resources.Endpoints {
 		if err := validateEDSEndpoints(cecNamespace, cecName, endpoints, resources.Listeners); err != nil {
@@ -571,8 +570,7 @@ func qualifyAddress(namespace, name string, address *envoy_config_core.Address) 
 	internalAddress := address.GetEnvoyInternalAddress()
 	if internalAddress != nil {
 		if x, ok := internalAddress.GetAddressNameSpecifier().(*envoy_config_core.EnvoyInternalAddress_ServerListenerName); ok && x.ServerListenerName != "" {
-			x.ServerListenerName, _ =
-				api.ResourceQualifiedName(namespace, name, x.ServerListenerName)
+			x.ServerListenerName, _ = api.ResourceQualifiedName(namespace, name, x.ServerListenerName)
 		}
 	}
 }
@@ -596,7 +594,8 @@ func qualifyEDSEndpoints(namespace, name string, eds *envoy_config_endpoint.Clus
 
 // validateAddress checks that the referred to internal listener is specified, if it is in the same CRD
 func validateAddress(namespace, name string, address *envoy_config_core.Address,
-	listeners []*envoy_config_listener.Listener) error {
+	listeners []*envoy_config_listener.Listener,
+) error {
 	internalAddress := address.GetEnvoyInternalAddress()
 	if internalAddress != nil {
 		if x, ok := internalAddress.GetAddressNameSpecifier().(*envoy_config_core.EnvoyInternalAddress_ServerListenerName); ok && x.ServerListenerName != "" {
@@ -623,7 +622,8 @@ func validateAddress(namespace, name string, address *envoy_config_core.Address,
 
 // validateEDSEndpoints checks internal listener references, if any
 func validateEDSEndpoints(namespace, name string, eds *envoy_config_endpoint.ClusterLoadAssignment,
-	listeners []*envoy_config_listener.Listener) error {
+	listeners []*envoy_config_listener.Listener,
+) error {
 	for _, cla := range eds.Endpoints {
 		for _, lbe := range cla.LbEndpoints {
 			endpoint := lbe.GetEndpoint()
@@ -835,27 +835,39 @@ func injectCiliumUpstreamL7Filter(opts *envoy_config_upstream.HttpProtocolOption
 	return changed, nil
 }
 
-func fillInTlsContextXDS(cecNamespace string, cecName string, tls *envoy_config_tls.CommonTlsContext) (updated bool) {
-	qualify := func(sc *envoy_config_tls.SdsSecretConfig) {
-		if sc.SdsConfig == nil {
-			sc.SdsConfig = envoy.CiliumXDSConfigSource
-			updated = true
-		}
-		var nameUpdated bool
-		sc.Name, nameUpdated = api.ResourceQualifiedName(cecNamespace, cecName, sc.Name)
-		if nameUpdated {
-			updated = true
-		}
+func qualifySdsSecretConfig(sc *envoy_config_tls.SdsSecretConfig, cecNamespace string, cecName string) bool {
+	updated := false
+
+	if sc.SdsConfig == nil {
+		sc.SdsConfig = envoy.CiliumXDSConfigSource
+		updated = true
 	}
+	var nameUpdated bool
+	sc.Name, nameUpdated = api.ResourceQualifiedName(cecNamespace, cecName, sc.Name)
+	if nameUpdated {
+		updated = true
+	}
+
+	return updated
+}
+
+func fillInTlsContextXDS(cecNamespace string, cecName string, tls *envoy_config_tls.CommonTlsContext) bool {
+	updated := false
 
 	if tls != nil {
 		for _, sc := range tls.TlsCertificateSdsSecretConfigs {
-			qualify(sc)
+			updated = qualifySdsSecretConfig(sc, cecNamespace, cecName) || updated
 		}
 		if sc := tls.GetValidationContextSdsSecretConfig(); sc != nil {
-			qualify(sc)
+			updated = qualifySdsSecretConfig(sc, cecNamespace, cecName) || updated
+		}
+		if cvc := tls.GetCombinedValidationContext(); cvc != nil {
+			if sc := cvc.GetValidationContextSdsSecretConfig(); sc != nil {
+				updated = qualifySdsSecretConfig(sc, cecNamespace, cecName) || updated
+			}
 		}
 	}
+
 	return updated
 }
 
@@ -869,7 +881,14 @@ func fillInTransportSocketXDS(cecNamespace string, cecName string, ts *envoy_con
 			var updated *anypb.Any
 			switch tls := any.(type) {
 			case *envoy_config_tls.DownstreamTlsContext:
-				if fillInTlsContextXDS(cecNamespace, cecName, tls.CommonTlsContext) {
+
+				wasUpdated := fillInTlsContextXDS(cecNamespace, cecName, tls.CommonTlsContext)
+
+				if tls.GetSessionTicketKeysSdsSecretConfig() != nil {
+					wasUpdated = qualifySdsSecretConfig(tls.GetSessionTicketKeysSdsSecretConfig(), cecNamespace, cecName) || wasUpdated
+				}
+
+				if wasUpdated {
 					updated = toAny(tls)
 				}
 			case *envoy_config_tls.UpstreamTlsContext:

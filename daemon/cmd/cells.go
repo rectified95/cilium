@@ -28,14 +28,17 @@ import (
 	"github.com/cilium/cilium/pkg/datapath"
 	"github.com/cilium/cilium/pkg/defaults"
 	"github.com/cilium/cilium/pkg/dial"
+	"github.com/cilium/cilium/pkg/dynamicconfig"
 	"github.com/cilium/cilium/pkg/egressgateway"
 	"github.com/cilium/cilium/pkg/endpoint"
 	"github.com/cilium/cilium/pkg/endpointcleanup"
 	"github.com/cilium/cilium/pkg/endpointmanager"
 	"github.com/cilium/cilium/pkg/envoy"
 	"github.com/cilium/cilium/pkg/gops"
+	identity "github.com/cilium/cilium/pkg/identity/cache/cell"
 	"github.com/cilium/cilium/pkg/identity/identitymanager"
 	ipamcell "github.com/cilium/cilium/pkg/ipam/cell"
+	ipcache "github.com/cilium/cilium/pkg/ipcache/cell"
 	"github.com/cilium/cilium/pkg/k8s"
 	k8sClient "github.com/cilium/cilium/pkg/k8s/client"
 	k8sSynced "github.com/cilium/cilium/pkg/k8s/synced"
@@ -46,12 +49,13 @@ import (
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/maps/metricsmap"
 	natStats "github.com/cilium/cilium/pkg/maps/nat/stats"
-	"github.com/cilium/cilium/pkg/maps/ratelimitmetricsmap"
+	"github.com/cilium/cilium/pkg/maps/ratelimitmap"
 	"github.com/cilium/cilium/pkg/metrics"
 	"github.com/cilium/cilium/pkg/node"
 	nodeManager "github.com/cilium/cilium/pkg/node/manager"
 	"github.com/cilium/cilium/pkg/nodediscovery"
 	"github.com/cilium/cilium/pkg/option"
+	policy "github.com/cilium/cilium/pkg/policy/cell"
 	policyDirectory "github.com/cilium/cilium/pkg/policy/directory"
 	policyK8s "github.com/cilium/cilium/pkg/policy/k8s"
 	"github.com/cilium/cilium/pkg/pprof"
@@ -81,10 +85,7 @@ var (
 
 		// Register the pprof HTTP handlers, to get runtime profiling data.
 		pprof.Cell,
-		cell.Config(pprof.Config{
-			PprofAddress: option.PprofAddressAgent,
-			PprofPort:    option.PprofPortAgent,
-		}),
+		cell.Config(pprofConfig),
 
 		// Runs the gops agent, a tool to diagnose Go processes.
 		gops.Cell(defaults.GopsPortAgent),
@@ -101,7 +102,7 @@ var (
 		metricsmap.Cell,
 
 		// Provides cilium_bpf_ratelimit_dropped_total Prometheus metric.
-		ratelimitmetricsmap.Cell,
+		ratelimitmap.Cell,
 
 		// Provide option.Config via hive so cells can depend on the agent config.
 		cell.Provide(func() *option.DaemonConfig { return option.Config }),
@@ -223,8 +224,11 @@ var (
 		// Auth is responsible for authenticating a request if required by a policy.
 		auth.Cell,
 
-		// IPCache, policy.Repository and CachingIdentityAllocator.
-		cell.Provide(newPolicyTrifecta),
+		// Provides IdentityAllocators (Responsible for allocating security identities)
+		identity.Cell,
+
+		// IPCache cell provides IPCache (IP to identity mappings)
+		ipcache.Cell,
 
 		// IPAM provides IP address management.
 		ipamcell.Cell,
@@ -234,6 +238,9 @@ var (
 
 		// ServiceCache holds the list of known services correlated with the matching endpoints.
 		k8s.ServiceCacheCell,
+
+		// Provides PolicyRepository (List of policy rules)
+		policy.Cell,
 
 		// K8s policy resource watcher cell. It depends on the half-initialized daemon which is
 		// resolved by newDaemonPromise()
@@ -277,6 +284,9 @@ var (
 
 		// Provide pcap recorder
 		recorder.Cell,
+
+		// Provides a wrapper of the cilium config that can be watched dynamically
+		dynamicconfig.Cell,
 	)
 )
 
@@ -312,4 +322,10 @@ func configureAPIServer(cfg *option.DaemonConfig, s *server.Server, db *statedb.
 	mux.Handle("/", s.GetHandler())
 	mux.Handle("/statedb/", http.StripPrefix("/statedb", db.HTTPHandler()))
 	s.SetHandler(mux)
+}
+
+var pprofConfig = pprof.Config{
+	Pprof:        false,
+	PprofAddress: option.PprofAddressAgent,
+	PprofPort:    option.PprofPortAgent,
 }

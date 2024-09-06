@@ -28,6 +28,7 @@ import (
 	"github.com/cilium/cilium/pkg/defaults"
 	"github.com/cilium/cilium/pkg/endpoint/regeneration"
 	"github.com/cilium/cilium/pkg/fqdn/restore"
+	"github.com/cilium/cilium/pkg/identity"
 	"github.com/cilium/cilium/pkg/loadinfo"
 	"github.com/cilium/cilium/pkg/logging"
 	"github.com/cilium/cilium/pkg/logging/logfields"
@@ -36,8 +37,10 @@ import (
 	"github.com/cilium/cilium/pkg/maps/policymap"
 	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/policy"
+	"github.com/cilium/cilium/pkg/policy/trafficdirection"
 	"github.com/cilium/cilium/pkg/revert"
 	"github.com/cilium/cilium/pkg/time"
+	"github.com/cilium/cilium/pkg/u8proto"
 	"github.com/cilium/cilium/pkg/version"
 )
 
@@ -187,7 +190,7 @@ func (e *Endpoint) writeHeaderfile(prefix string) error {
 		return err
 	}
 
-	if err = e.owner.Datapath().Orchestrator().WriteEndpointConfig(f, e); err != nil {
+	if err = e.owner.Orchestrator().WriteEndpointConfig(f, e); err != nil {
 		return err
 	}
 
@@ -201,11 +204,11 @@ type proxyPolicy struct {
 	*policy.L4Filter
 	ps       *policy.PerSelectorPolicy
 	port     uint16
-	protocol uint8
+	protocol u8proto.U8proto
 }
 
 // newProxyPolicy returns a new instance of proxyPolicy by value
-func (e *Endpoint) newProxyPolicy(l4 *policy.L4Filter, ps *policy.PerSelectorPolicy, port uint16, proto uint8) proxyPolicy {
+func (e *Endpoint) newProxyPolicy(l4 *policy.L4Filter, ps *policy.PerSelectorPolicy, port uint16, proto u8proto.U8proto) proxyPolicy {
 	return proxyPolicy{L4Filter: l4, ps: ps, port: port, protocol: proto}
 }
 
@@ -216,7 +219,7 @@ func (p *proxyPolicy) GetPort() uint16 {
 }
 
 // GetProtocol returns the destination protocol number on which the proxy policy applies
-func (p *proxyPolicy) GetProtocol() uint8 {
+func (p *proxyPolicy) GetProtocol() u8proto.U8proto {
 	return p.protocol
 }
 
@@ -243,7 +246,7 @@ func (e *Endpoint) addNewRedirectsFromDesiredPolicy(ingress bool, desiredRedirec
 
 	changes := policy.ChangeState{
 		Adds: make(policy.Keys),
-		Old:  make(map[policy.Key]policy.MapStateEntry),
+		Old:  make(policy.MapStateMap),
 	}
 
 	// create or update proxy redirects
@@ -329,7 +332,7 @@ func (e *Endpoint) addVisibilityRedirects(ingress bool, desiredRedirects map[str
 		revertStack  revert.RevertStack
 		changes      = policy.ChangeState{
 			Adds: make(policy.Keys),
-			Old:  make(map[policy.Key]policy.MapStateEntry),
+			Old:  make(policy.MapStateMap),
 		}
 	)
 
@@ -518,9 +521,7 @@ func (e *Endpoint) removeOldRedirects(desiredRedirects, realizedRedirects map[st
 // Whether the new state dir is populated with all new BPF state files,
 // and an error if something failed.
 func (e *Endpoint) regenerateBPF(regenContext *regenerationContext) (revnum uint64, reterr error) {
-	var (
-		err error
-	)
+	var err error
 
 	stats := &regenContext.Stats
 	stats.waitingForLock.Start()
@@ -675,7 +676,7 @@ func (e *Endpoint) realizeBPFState(regenContext *regenerationContext) (err error
 		}
 
 		// Compile and install BPF programs for this endpoint
-		templateHash, err := e.owner.Datapath().Orchestrator().ReloadDatapath(datapathRegenCtxt.completionCtx, datapathRegenCtxt.epInfoCache, &stats.datapathRealization)
+		templateHash, err := e.owner.Orchestrator().ReloadDatapath(datapathRegenCtxt.completionCtx, datapathRegenCtxt.epInfoCache, &stats.datapathRealization)
 		if err != nil {
 			if !errors.Is(err, context.Canceled) {
 				e.getLogger().WithError(err).Error("Error while reloading endpoint BPF program")
@@ -935,7 +936,7 @@ func (e *Endpoint) runPreCompilationSteps(regenContext *regenerationContext, rul
 
 	// Avoid BPF program compilation and installation if the headerfile for the endpoint
 	// or the node have not changed.
-	datapathRegenCtxt.bpfHeaderfilesHash, err = e.owner.Datapath().Orchestrator().EndpointHash(e)
+	datapathRegenCtxt.bpfHeaderfilesHash, err = e.owner.Orchestrator().EndpointHash(e)
 	if err != nil {
 		return fmt.Errorf("hash header file: %w", err)
 	}
@@ -1014,7 +1015,7 @@ func (e *Endpoint) deleteMaps() []error {
 
 	// Remove rate limit from bandwidth manager map.
 	if e.bps != 0 {
-		e.owner.Datapath().BandwidthManager().DeleteBandwidthLimit(e.ID)
+		e.owner.BandwidthManager().DeleteBandwidthLimit(e.ID)
 	}
 
 	if e.ConntrackLocalLocked() {
@@ -1114,6 +1115,7 @@ type PolicyMapPressureEvent struct {
 	Value      float64
 	EndpointID uint16
 }
+
 type policyMapPressureUpdater interface {
 	Update(PolicyMapPressureEvent)
 	Remove(uint16)
@@ -1129,8 +1131,7 @@ func (e *Endpoint) updatePolicyMapPressureMetric() {
 
 func (e *Endpoint) deletePolicyKey(keyToDelete policy.Key, incremental bool) bool {
 	// Convert from policy.Key to policymap.Key
-	policymapKey := policymap.NewKey(keyToDelete.Identity, keyToDelete.DestPort, keyToDelete.PortMask(),
-		keyToDelete.Nexthdr, keyToDelete.TrafficDirection)
+	policymapKey := policymap.NewKey(keyToDelete.TrafficDirection(), keyToDelete.Identity, keyToDelete.Nexthdr, keyToDelete.DestPort, keyToDelete.PortPrefixLen())
 
 	// Do not error out if the map entry was already deleted from the bpf map.
 	// Incremental updates depend on this being OK in cases where identity change
@@ -1163,8 +1164,7 @@ func (e *Endpoint) deletePolicyKey(keyToDelete policy.Key, incremental bool) boo
 
 func (e *Endpoint) addPolicyKey(keyToAdd policy.Key, entry policy.MapStateEntry, incremental bool) bool {
 	// Convert from policy.Key to policymap.Key
-	policymapKey := policymap.NewKey(keyToAdd.Identity, keyToAdd.DestPort, keyToAdd.PortMask(),
-		keyToAdd.Nexthdr, keyToAdd.TrafficDirection)
+	policymapKey := policymap.NewKey(keyToAdd.TrafficDirection(), keyToAdd.Identity, keyToAdd.Nexthdr, keyToAdd.DestPort, keyToAdd.PortPrefixLen())
 
 	var err error
 	if entry.IsDeny {
@@ -1395,13 +1395,9 @@ func (e *Endpoint) dumpPolicyMapToMapState() (policy.MapState, error) {
 	cb := func(key bpf.MapKey, value bpf.MapValue) {
 		policymapKey := key.(*policymap.PolicyKey)
 		// Convert from policymap.Key to policy.Key
-		policyKey := policy.Key{
-			Identity:         policymapKey.Identity,
-			DestPort:         policymapKey.GetDestPort(),
-			InvertedPortMask: ^policymapKey.GetPortMask(),
-			Nexthdr:          policymapKey.Nexthdr,
-			TrafficDirection: policymapKey.TrafficDirection,
-		}
+		policyKey := policy.KeyForDirection(trafficdirection.TrafficDirection(policymapKey.TrafficDirection)).
+			WithIdentity(identity.NumericIdentity(policymapKey.Identity)).
+			WithPortProtoPrefix(u8proto.U8proto(policymapKey.Nexthdr), policymapKey.GetDestPort(), policymapKey.GetPortPrefixLen())
 		policymapEntry := value.(*policymap.PolicyEntry)
 		// Convert from policymap.PolicyEntry to policy.MapStateEntry.
 		policyEntry := policy.MapStateEntry{
@@ -1444,7 +1440,6 @@ func (e *Endpoint) syncPolicyMapWithDump() error {
 	}
 
 	currentMap, err := e.dumpPolicyMapToMapState()
-
 	// If map is unable to be dumped, attempt to close map and open it again.
 	// See GH-4229.
 	if err != nil {

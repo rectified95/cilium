@@ -50,6 +50,7 @@ const (
 	ep3IP = "10.0.0.3"
 
 	destCIDR        = "1.1.1.0/24"
+	destCIDR3       = "1.1.3.0/24"
 	allZeroDestCIDR = "0.0.0.0/0"
 	excludedCIDR1   = "1.1.1.22/32"
 	excludedCIDR2   = "1.1.1.240/30"
@@ -64,6 +65,9 @@ const (
 	// Special values for gatewayIP, see pkg/egressgateway/manager.go
 	gatewayNotFoundValue     = "0.0.0.0"
 	gatewayExcludedCIDRValue = "0.0.0.1"
+
+	// Special values for egressIP, see pkg/egressgateway/manager.go
+	egressIPNotFoundValue = "0.0.0.0"
 )
 
 var (
@@ -404,6 +408,22 @@ func TestEgressGatewayManager(t *testing.T) {
 		{ep2IP, destCIDR, zeroIP4, node2IP},
 	})
 
+	// Test a policy without valid egressIP
+	addPolicy(t, k.policies, &policyParams{
+		name:            "policy-3",
+		endpointLabels:  ep1Labels,
+		destinationCIDR: destCIDR3,
+		nodeLabels:      nodeGroup1Labels,
+		iface:           "no_interface",
+	})
+	reconciliationEventsCount = waitForReconciliationRun(t, egressGatewayManager, reconciliationEventsCount)
+
+	assertEgressRules(t, policyMap, []egressRule{
+		{ep1IP, destCIDR, zeroIP4, gatewayNotFoundValue},
+		{ep1IP, destCIDR3, egressIPNotFoundValue, node1IP},
+		{ep2IP, destCIDR, zeroIP4, node2IP},
+	})
+
 	// Update the endpoint labels in order for it to not be a match
 	_ = updateEndpointAndIdentity(&ep1, id1, map[string]string{})
 	addEndpoint(t, k.endpoints, &ep1)
@@ -529,7 +549,7 @@ func createTestInterface(tb testing.TB, sysctl sysctl.Sysctl, iface string, addr
 }
 
 func ensureRPFilterIsEnabled(tb testing.TB, sysctl sysctl.Sysctl, iface string) {
-	rpFilterSetting := fmt.Sprintf("net.ipv4.conf.%s.rp_filter", iface)
+	rpFilterSetting := []string{"net", "ipv4", "conf", iface, "rp_filter"}
 
 	for i := 0; i < 10; i++ {
 		if err := sysctl.Enable(rpFilterSetting); err != nil {
@@ -677,7 +697,7 @@ func assertRPFilter(t *testing.T, sysctl sysctl.Sysctl, rpFilterSettings []rpFil
 
 func tryAssertRPFilterSettings(sysctl sysctl.Sysctl, rpFilterSettings []rpFilterSetting) error {
 	for _, setting := range rpFilterSettings {
-		if val, err := sysctl.Read(fmt.Sprintf("net.ipv4.conf.%s.rp_filter", setting.iFaceName)); err != nil {
+		if val, err := sysctl.Read([]string{"net", "ipv4", "conf", setting.iFaceName, "rp_filter"}); err != nil {
 			return fmt.Errorf("failed to read rp_filter")
 		} else if val != setting.rpFilterSetting {
 			return fmt.Errorf("mismatched rp_filter iface: %s rp_filter: %s", setting.iFaceName, val)

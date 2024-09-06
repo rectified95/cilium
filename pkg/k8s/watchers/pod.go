@@ -20,6 +20,7 @@ import (
 	"github.com/cilium/hive/cell"
 	"github.com/cilium/statedb"
 	"github.com/sirupsen/logrus"
+	"go4.org/netipx"
 	k8sErrors "k8s.io/apimachinery/pkg/api/errors"
 	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
@@ -40,7 +41,6 @@ import (
 	"github.com/cilium/cilium/pkg/endpoint/regeneration"
 	"github.com/cilium/cilium/pkg/endpointmanager"
 	"github.com/cilium/cilium/pkg/identity"
-	"github.com/cilium/cilium/pkg/ip"
 	"github.com/cilium/cilium/pkg/ipcache"
 	"github.com/cilium/cilium/pkg/k8s"
 	k8sClient "github.com/cilium/cilium/pkg/k8s/client"
@@ -712,7 +712,7 @@ func (k *K8sPodWatcher) genServiceMappings(pod *slim_corev1.Pod, podIPs []string
 					}
 					loopbackHostport = true
 				}
-				nodeAddrAll = []netip.Addr{ip.MustAddrFromIP(feIP)}
+				nodeAddrAll = []netip.Addr{netipx.MustFromStdIP(feIP)}
 			} else {
 				iter := k.nodeAddrs.List(k.db.ReadTxn(), datapathTables.NodeAddressNodePortIndex.Query(true))
 				for addr, _, ok := iter.Next(); ok; addr, _, ok = iter.Next() {
@@ -930,14 +930,6 @@ func (k *K8sPodWatcher) updatePodHostData(oldPod, newPod *slim_corev1.Pod, oldPo
 	specEqual := oldPod != nil && newPod.Spec.DeepEqual(&oldPod.Spec)
 	hostIPEqual := oldPod != nil && newPod.Status.HostIP != oldPod.Status.HostIP
 
-	// only upsert HostPort Mapping if spec or ip slice is different
-	if !specEqual || !ipSliceEqual {
-		err := k.upsertHostPortMapping(oldPod, newPod, oldPodIPs, newPodIPs)
-		if err != nil {
-			return fmt.Errorf("cannot upsert hostPort for PodIPs: %s", newPodIPs)
-		}
-	}
-
 	// is spec and hostIPs are the same there no need to perform the remaining
 	// operations
 	if specEqual && hostIPEqual {
@@ -971,7 +963,7 @@ func (k *K8sPodWatcher) updatePodHostData(oldPod, newPod *slim_corev1.Pod, oldPo
 			}
 			k8sMeta.NamedPorts[port.Name] = ciliumTypes.PortProto{
 				Port:  uint16(port.ContainerPort),
-				Proto: uint8(p),
+				Proto: p,
 			}
 		}
 	}
@@ -1012,6 +1004,17 @@ func (k *K8sPodWatcher) updatePodHostData(oldPod, newPod *slim_corev1.Pod, oldPo
 	}
 	if len(errs) != 0 {
 		return errors.New(strings.Join(errs, ", "))
+	}
+
+	nodeNameEqual := newPod.Spec.NodeName == nodeTypes.GetName()
+
+	// only upsert HostPort Mapping if the pod is on the local node
+	// and spec or ip slice is different
+	if nodeNameEqual && (!specEqual || !ipSliceEqual) {
+		err := k.upsertHostPortMapping(oldPod, newPod, oldPodIPs, newPodIPs)
+		if err != nil {
+			return fmt.Errorf("cannot upsert hostPort for PodIPs: %s", newPodIPs)
+		}
 	}
 
 	return nil

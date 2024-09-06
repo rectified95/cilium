@@ -25,10 +25,6 @@ type MockDatapathUpdater struct{}
 func (m *MockDatapathUpdater) InstallProxyRules(proxyPort uint16, name string) {
 }
 
-func (m *MockDatapathUpdater) SupportsOriginalSourceAddr() bool {
-	return true
-}
-
 func (m *MockDatapathUpdater) GetProxyPorts() map[string]uint16 {
 	return nil
 }
@@ -213,8 +209,8 @@ func (p *fakeProxyPolicy) GetPort() uint16 {
 	return uint16(80)
 }
 
-func (p *fakeProxyPolicy) GetProtocol() uint8 {
-	return uint8(u8proto.UDP)
+func (p *fakeProxyPolicy) GetProtocol() u8proto.U8proto {
+	return u8proto.UDP
 }
 
 func (p *fakeProxyPolicy) GetListener() string {

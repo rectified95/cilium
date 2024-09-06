@@ -765,19 +765,6 @@
                     "type": "integer"
                   }
                 }
-              },
-              {
-                "properties": {
-                  "burst": {
-                    "type": "integer"
-                  },
-                  "limit": {
-                    "type": "integer"
-                  },
-                  "nodes": {
-                    "type": "integer"
-                  }
-                }
               }
             ]
           },
@@ -3867,6 +3854,9 @@
       "properties": {
         "acceleration": {
           "type": "string"
+        },
+        "experimental": {
+          "type": "boolean"
         },
         "l7": {
           "properties": {

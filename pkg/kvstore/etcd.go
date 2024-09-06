@@ -18,7 +18,6 @@ import (
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	v3rpcErrors "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	"go.etcd.io/etcd/client/pkg/v3/logutil"
-	"go.etcd.io/etcd/client/pkg/v3/tlsutil"
 	client "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/client/v3/concurrency"
 	clientyaml "go.etcd.io/etcd/client/v3/yaml"
@@ -84,9 +83,6 @@ var (
 	// the etcd server
 	initialConnectionTimeout = 15 * time.Minute
 
-	// etcdDummyAddress can be overwritten from test invokers using ldflags
-	etcdDummyAddress = "http://127.0.0.1:4002"
-
 	etcdInstance = newEtcdModule()
 
 	// etcd3ClientLogger is the logger used for the underlying etcd clients. We
@@ -94,10 +90,6 @@ var (
 	// automatically creating a new one, which comes with a significant memory cost.
 	etcd3ClientLogger *zap.Logger
 )
-
-func EtcdDummyAddress() string {
-	return etcdDummyAddress
-}
 
 func newEtcdModule() backendModule {
 	return &etcdModule{
@@ -160,11 +152,6 @@ func (e *etcdModule) createInstance() backendModule {
 
 func (e *etcdModule) getName() string {
 	return EtcdBackendName
-}
-
-func (e *etcdModule) setConfigDummy() {
-	e.config = &client.Config{}
-	e.config.Endpoints = []string{etcdDummyAddress}
 }
 
 func (e *etcdModule) setConfig(opts map[string]string) error {
@@ -411,7 +398,8 @@ func (e *etcdClient) maybeWaitForInitLock(ctx context.Context) error {
 	if e.extraOptions != nil && e.extraOptions.NoLockQuorumCheck {
 		return nil
 	}
-
+	limiter := newExpBackoffRateLimiter(e, "etcd-client-init-lock")
+	defer limiter.Reset()
 	for {
 		select {
 		case <-e.client.Ctx().Done():
@@ -430,8 +418,7 @@ func (e *etcdClient) maybeWaitForInitLock(ctx context.Context) error {
 			e.logger.Debug("Distributed lock successful, etcd has quorum")
 			return nil
 		}
-
-		time.Sleep(100 * time.Millisecond)
+		limiter.Wait(ctx)
 	}
 }
 
@@ -468,6 +455,8 @@ func (e *etcdClient) isConnectedAndHasQuorum(ctx context.Context) error {
 func (e *etcdClient) Connected(ctx context.Context) <-chan error {
 	out := make(chan error)
 	go func() {
+		limiter := newExpBackoffRateLimiter(e, "etcd-client-connected")
+		defer limiter.Reset()
 		defer close(out)
 		for {
 			select {
@@ -482,7 +471,7 @@ func (e *etcdClient) Connected(ctx context.Context) <-chan error {
 			if e.isConnectedAndHasQuorum(ctx) == nil {
 				return
 			}
-			time.Sleep(100 * time.Millisecond)
+			limiter.Wait(ctx)
 		}
 	}()
 	return out
@@ -493,7 +482,8 @@ func (e *etcdClient) Connected(ctx context.Context) <-chan error {
 // connected with the kvstore.
 func (e *etcdClient) Disconnected() <-chan struct{} {
 	<-e.firstSession
-
+	limiter := newExpBackoffRateLimiter(e, "etcd-client-disconnected")
+	defer limiter.Reset()
 	for {
 		session, err := e.lockLeaseManager.GetSession(context.Background(), InitLockPath)
 		if err == nil {
@@ -501,13 +491,13 @@ func (e *etcdClient) Disconnected() <-chan struct{} {
 		}
 
 		e.logger.WithError(err).Warning("Failed to acquire lock session")
-		time.Sleep(100 * time.Millisecond)
+		limiter.Wait(context.TODO())
 	}
 }
 
 func connectEtcdClient(ctx context.Context, config *client.Config, cfgPath string, errChan chan error, clientOptions clientOptions, opts *ExtraOptions) (BackendOperations, error) {
 	if cfgPath != "" {
-		cfg, err := newConfig(cfgPath)
+		cfg, err := clientyaml.NewConfig(cfgPath)
 		if err != nil {
 			return nil, err
 		}
@@ -703,6 +693,19 @@ func makeSessionName(sessionPrefix string, opts *ExtraOptions) string {
 	return sessionPrefix
 }
 
+func newExpBackoffRateLimiter(e *etcdClient, name string) backoff.Exponential {
+	errLimiter := backoff.Exponential{
+		Name: name,
+		Min:  50 * time.Millisecond,
+		Max:  1 * time.Minute,
+	}
+
+	if e != nil && e.extraOptions != nil {
+		errLimiter.NodeManager = backoff.NewNodeManager(e.extraOptions.ClusterSizeDependantInterval)
+	}
+	return errLimiter
+}
+
 func (e *etcdClient) sessionError() (err error) {
 	e.RWMutex.RLock()
 	err = e.sessionErr
@@ -788,15 +791,7 @@ func (e *etcdClient) watch(ctx context.Context, w *Watcher) {
 	// errLimiter is used to rate limit the retry of the first Get request in case an error
 	// has occurred, to prevent overloading the etcd server due to the more aggressive
 	// default rate limiter.
-	errLimiter := backoff.Exponential{
-		Name: "etcd-list-before-watch-error",
-		Min:  50 * time.Millisecond,
-		Max:  1 * time.Minute,
-	}
-
-	if e.extraOptions != nil {
-		errLimiter.NodeManager = backoff.NewNodeManager(e.extraOptions.ClusterSizeDependantInterval)
-	}
+	errLimiter := newExpBackoffRateLimiter(e, "etcd-list-before-watch-error")
 
 reList:
 	for {
@@ -1634,46 +1629,6 @@ func (e *etcdClient) UserEnforceAbsence(ctx context.Context, name string) error 
 	return nil
 }
 
-// newConfig is a wrapper of clientyaml.NewConfig. Since etcd has deprecated
-// the `ca-file` field from yamlConfig in v3.4, the clientyaml.NewConfig won't
-// read that field from the etcd configuration file making Cilium fail to
-// connect to a TLS-enabled etcd server. Since we should have deprecated the
-// usage of this field a long time ago, in this galaxy, we will have this
-// wrapper function as a workaround which will still use the `ca-file` field to
-// avoid users breaking their connectivity to etcd when upgrading Cilium.
-// TODO remove this wrapper in cilium >= 1.8
-func newConfig(fpath string) (*client.Config, error) {
-	cfg, err := clientyaml.NewConfig(fpath)
-	if err != nil {
-		return nil, err
-	}
-	if cfg.TLS == nil || cfg.TLS.RootCAs != nil {
-		return cfg, nil
-	}
-
-	yc := &yamlConfig{}
-	b, err := os.ReadFile(fpath)
-	if err != nil {
-		return nil, err
-	}
-	err = yaml.Unmarshal(b, yc)
-	if err != nil {
-		return nil, err
-	}
-	if yc.InsecureTransport {
-		return cfg, nil
-	}
-
-	if yc.CAfile != "" {
-		cp, err := tlsutil.NewCertPool([]string{yc.CAfile})
-		if err != nil {
-			return nil, err
-		}
-		cfg.TLS.RootCAs = cp
-	}
-	return cfg, nil
-}
-
 // reload on-disk certificate and key when needed
 func getClientCertificateReloader(fpath string) (func(*tls.CertificateRequestInfo) (*tls.Certificate, error), error) {
 	yc := &yamlKeyPairConfig{}
@@ -1701,20 +1656,4 @@ func getClientCertificateReloader(fpath string) (func(*tls.CertificateRequestInf
 type yamlKeyPairConfig struct {
 	Certfile string `json:"cert-file"`
 	Keyfile  string `json:"key-file"`
-}
-
-// copy of the internal structure in github.com/etcd-io/etcd/clientv3/yaml so we
-// can still use the `ca-file` field for one more release.
-type yamlConfig struct {
-	client.Config
-
-	InsecureTransport     bool   `json:"insecure-transport"`
-	InsecureSkipTLSVerify bool   `json:"insecure-skip-tls-verify"`
-	Certfile              string `json:"cert-file"`
-	Keyfile               string `json:"key-file"`
-	TrustedCAfile         string `json:"trusted-ca-file"`
-
-	// CAfile is being deprecated. Use 'TrustedCAfile' instead.
-	// TODO: deprecate this in v4
-	CAfile string `json:"ca-file"`
 }

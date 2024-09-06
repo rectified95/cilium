@@ -41,10 +41,22 @@ extensions = ['myst_parser',
               'sphinx.ext.githubpages',
               'sphinx.ext.extlinks',
               'sphinxcontrib.openapi',
+              'sphinx.ext.imgconverter',
               'sphinx_tabs.tabs',
               'sphinxcontrib.googleanalytics',
               'sphinxcontrib.spelling',
-              'versionwarning.extension']
+              'versionwarning.extension',
+              "sphinxext.rediraffe",
+]
+
+rediraffe_redirects = 'redirects.txt'
+# rediraffe_branch is the base for which rediraffe compares the current HEAD to
+# to detect which Documentation pages have moved or been deleted so it can
+# check for missing redirects and automatically generate new redirect files.
+# The value specified is the commit before we branched v1.16 found using:
+# `git merge-base v1.16 main`
+rediraffe_branch = '5614531067a83e20d24bccc7b12b314330d043c3'
+rediraffe_auto_redirect_perc = 90
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
@@ -299,8 +311,6 @@ linkcheck_ignore = [
     # Needs authentication
     'https://github.com/cilium/cilium/projects/new',
     'https://github.com/cilium/cilium/settings/branches',
-    'https://jenkins.cilium.io/job/',
-    'https://jenkins.cilium.io/view/'
 ]
 
 linkcheck_anchors = False

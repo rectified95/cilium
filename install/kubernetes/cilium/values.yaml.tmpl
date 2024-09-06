@@ -771,11 +771,8 @@ ciliumEndpointSlice:
     limit: 10
     burst: 20
   - nodes: 100
-    limit: 7
-    burst: 15
-  - nodes: 500
-    limit: 5
-    burst: 10
+    limit: 50
+    burst: 100
 
   # @schema
   # enum: ["identity", "fcfs"]
@@ -2063,6 +2060,10 @@ loadBalancer:
   # -- serviceTopology enables K8s Topology Aware Hints -based service
   # endpoints filtering
   # serviceTopology: false
+
+  # -- experimental enables support for the experimental load-balancing 
+  # control-plane.
+  experimental: false
 
   # -- L7 LoadBalancer
   l7:

@@ -20,6 +20,7 @@ import (
 	"github.com/cilium/hive/cell"
 	"github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
+	"go4.org/netipx"
 	k8sTypes "k8s.io/apimachinery/pkg/types"
 
 	"github.com/cilium/cilium/api/v1/models"
@@ -37,7 +38,6 @@ import (
 	"github.com/cilium/cilium/pkg/fqdn/restore"
 	"github.com/cilium/cilium/pkg/identity"
 	"github.com/cilium/cilium/pkg/identity/cache"
-	ippkg "github.com/cilium/cilium/pkg/ip"
 	ipamOption "github.com/cilium/cilium/pkg/ipam/option"
 	slim_corev1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/api/core/v1"
 	"github.com/cilium/cilium/pkg/labels"
@@ -53,7 +53,6 @@ import (
 	"github.com/cilium/cilium/pkg/node"
 	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/policy"
-	"github.com/cilium/cilium/pkg/policy/trafficdirection"
 	"github.com/cilium/cilium/pkg/proxy/accesslog"
 	"github.com/cilium/cilium/pkg/time"
 	"github.com/cilium/cilium/pkg/trigger"
@@ -630,8 +629,8 @@ func CreateIngressEndpoint(owner regeneration.Owner, policyGetter policyRepoGett
 	ep.properties[PropertyWithouteBPFDatapath] = true
 
 	// node.GetIngressIPv4 has been parsed with net.ParseIP() and may be in IPv4 mapped IPv6
-	// address format. Use ippkg.AddrFromIP() to make sure we get a plain IPv4 address.
-	ep.IPv4, _ = ippkg.AddrFromIP(node.GetIngressIPv4())
+	// address format. Use netipx.FromStdIP() to make sure we get a plain IPv4 address.
+	ep.IPv4, _ = netipx.FromStdIP(node.GetIngressIPv4())
 	ep.IPv6, _ = netip.AddrFromSlice(node.GetIngressIPv6())
 
 	ep.setState(StateWaitingForIdentity, "Ingress Endpoint creation")
@@ -788,11 +787,7 @@ func (e *Endpoint) Allows(id identity.NumericIdentity) bool {
 	e.unconditionalRLock()
 	defer e.runlock()
 
-	keyToLookup := policy.Key{
-		Identity:         uint32(id),
-		InvertedPortMask: 0xffff, // this is a wildcard
-		TrafficDirection: trafficdirection.Ingress.Uint8(),
-	}
+	keyToLookup := policy.IngressKey().WithIdentity(id)
 
 	v, ok := e.desiredPolicy.GetPolicyMap().Get(keyToLookup)
 	return ok && !v.IsDeny
@@ -2050,7 +2045,7 @@ func (e *Endpoint) UpdateLabels(ctx context.Context, sourceFilter string, identi
 	// - the endpoint is in this init state.
 	if len(identityLabels) != 0 &&
 		sourceFilter != labels.LabelSourceAny &&
-		!identityLabels.Has(labels.NewLabel(labels.IDNameInit, "", labels.LabelSourceReserved)) &&
+		!identityLabels.HasInitLabel() &&
 		e.IsInit() {
 
 		idLabls := e.OpLabels.IdentityLabels()
@@ -2511,10 +2506,10 @@ func (e *Endpoint) Delete(conf DeleteConfig) []error {
 		}).Debug("Deleting endpoint NOTRACK rules")
 
 		if e.IPv4.IsValid() {
-			e.owner.Datapath().RemoveNoTrackRules(e.IPv4, e.noTrackPort)
+			e.owner.IPTablesManager().RemoveNoTrackRules(e.IPv4, e.noTrackPort)
 		}
 		if e.IPv6.IsValid() {
-			e.owner.Datapath().RemoveNoTrackRules(e.IPv6, e.noTrackPort)
+			e.owner.IPTablesManager().RemoveNoTrackRules(e.IPv6, e.noTrackPort)
 		}
 	}
 
@@ -2527,7 +2522,7 @@ func (e *Endpoint) Delete(conf DeleteConfig) []error {
 		}
 
 		// Detach the endpoint program from any tc(x) hooks.
-		e.owner.Datapath().Orchestrator().Unload(e.createEpInfoCache(""))
+		e.owner.Orchestrator().Unload(e.createEpInfoCache(""))
 
 		// Delete the endpoint's entries from the global cilium_(egress)call_policy
 		// maps and remove per-endpoint cilium_calls_ and cilium_policy_ map pins.

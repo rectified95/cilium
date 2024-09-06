@@ -23,12 +23,12 @@
     ".github/actions/set-env-variables/action.yml",
     ".github/workflows/**",
     ".github/ISSUE_TEMPLATE/bug_report.yaml",
+    "cilium-cli/**",
     "images/**",
     "examples/hubble/*",
     "go.mod",
     "go.sum",
     "Makefile.defs",
-    "test/kubernetes-test.sh",
     "test/packet/scripts/install.sh",
     "install/kubernetes/cilium/templates/spire/**",
     "install/kubernetes/cilium/values.yaml.tmpl",
@@ -68,7 +68,6 @@
     "v1.16",
     "v1.15",
     "v1.14",
-    "v1.13"
   ],
   "vulnerabilityAlerts": {
     "enabled": true
@@ -83,7 +82,8 @@
     "^make -C install/kubernetes$",
     "^make -C Documentation update-helm-values$",
     "^make generate-k8s-api$",
-    "^make manifests$"
+    "^make manifests$",
+    "^make generate-apis$"
   ],
   "assignAutomerge": true,
   "packageRules": [
@@ -190,7 +190,6 @@
         "v1.16",
         "v1.15",
         "v1.14",
-        "v1.13"
       ]
     },
     {
@@ -206,7 +205,6 @@
         "v1.16",
         "v1.15",
         "v1.14",
-        "v1.13"
       ]
     },
     {
@@ -229,7 +227,9 @@
         // master branch to the latest release. Ignore this dependency until a
         // v2 release is out which is tracked with the following upstream issue:
         // https://github.com/google/go-licenses/issues/205
-        "github.com/google/go-licenses"
+        "github.com/google/go-licenses",
+        // We update this dependency manually together with conformance test changes
+        "sigs.k8s.io/gateway-api"
       ],
       "matchPackagePatterns": [
         // We can't update these libraries until github.com/shoenig/go-m1cpu
@@ -272,7 +272,6 @@
         "v1.16",
         "v1.15",
         "v1.14",
-        "v1.13"
       ]
     },
     {
@@ -283,7 +282,6 @@
       "allowedVersions": "<3.5.5",
       "matchBaseBranches": [
         "v1.14",
-        "v1.13"
       ]
     },
     {
@@ -332,7 +330,6 @@
         "v1.16",
         "v1.15",
         "v1.14",
-        "v1.13"
       ],
     },
     {
@@ -345,7 +342,6 @@
         "v1.16",
         "v1.15",
         "v1.14",
-        "v1.13"
       ]
     },
     {
@@ -369,15 +365,6 @@
     },
     {
       "matchPackageNames": [
-        "docker.io/library/alpine"
-      ],
-      "allowedVersions": "<3.18",
-      "matchBaseBranches": [
-        "v1.13"
-      ]
-    },
-    {
-      "matchPackageNames": [
         "quay.io/cilium/certgen",
       ],
       "allowedVersions": "<0.2.0",
@@ -385,7 +372,6 @@
         "v1.16",
         "v1.15",
         "v1.14",
-        "v1.13"
       ]
     },
     {
@@ -429,23 +415,6 @@
       ]
     },
     {
-      // Do not bump the minor version for Cilium <v1.14. Certain workflows
-      // are already using Cilium CLI v0.15.*, so let's enable patch versions.
-      "enabled": false,
-      "groupName": "Cilium CLI",
-      "groupSlug": "cilium-cli",
-      "matchDepNames": [
-        "cilium/cilium-cli"
-      ],
-      "matchUpdateTypes": [
-        "major",
-        "minor"
-      ],
-      "matchBaseBranches": [
-        "v1.13"
-      ]
-    },
-    {
       "groupName": "Hubble CLI",
       "groupSlug": "hubble-cli",
       "matchDepNames": [
@@ -478,7 +447,6 @@
         "v1.16",
         "v1.15",
         "v1.14",
-        "v1.13"
       ]
     },
     {
@@ -501,7 +469,6 @@
         "v1.16",
         "v1.15",
         "v1.14",
-        "v1.13"
       ],
     },
     {
@@ -593,22 +560,32 @@
       }
     },
     {
+      matchPackageNames: [
+        "protocolbuffers/protobuf"
+      ],
+      "postUpgradeTasks": {
+        "commands": [
+          "make generate-apis"
+        ],
+        "executionMode": "update"
+      }
+    },
+    {
       "matchDepNames": [
         "quay.io/cilium/cilium-envoy"
       ],
-      "versioning": "regex:v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)-.*$",
+      "versioning": "regex:v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)-(?<build>\\d+).*$",
       "allowedVersions": "<1.29",
       "matchBaseBranches": [
         "v1.15",
         "v1.14",
-        "v1.13"
       ]
     },
     {
       "matchDepNames": [
         "quay.io/cilium/cilium-envoy"
       ],
-      "versioning": "regex:v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)-.*$",
+      "versioning": "regex:v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)-(?<build>\\d+).*$",
       "allowedVersions": "<1.30",
       "matchBaseBranches": [
         "v1.16",
@@ -618,7 +595,7 @@
       "matchDepNames": [
         "quay.io/cilium/cilium-envoy"
       ],
-      "versioning": "regex:v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)-.*$",
+      "versioning": "regex:v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)-(?<build>\\d+).*$",
       "allowedVersions": "<1.31",
       "matchBaseBranches": [
         "main",
@@ -736,8 +713,6 @@
     },
     {
       "fileMatch": [
-        "^test/kubernetes-test\\.sh$",
-        "^test/packet/scripts/install\\.sh$",
         "^.github/actions/set-env-variables/action\\.yml$"
       ],
       "matchStrings": [
@@ -771,6 +746,15 @@
       //   https://docs.renovatebot.com/modules/manager/regex/#advanced-capture
       "matchStrings": [
         "# renovate: datasource=(?<datasource>.*?)\\s+.+_REPO:=(?<depName>.*?)\\s+.+_VERSION:=(?<currentValue>.*)\\s+.+_DIGEST:=(?<currentDigest>sha256:[a-f0-9]+)"
+      ]
+    },
+    {
+      "fileMatch": [
+        "^cilium-cli/defaults/defaults\\.go$"
+      ],
+      "matchStrings": [
+        "\/\/ renovate: datasource=(?<datasource>.*?)\\s+.+Image = \"(?<depName>.*):(?<currentValue>.*)@(?<currentDigest>sha256:[a-f0-9]+)\"",
+        "\/\/ renovate: datasource=(?<datasource>.*?) depName=(?<depName>.*?)\\s+Version = \"(?<currentValue>.*)\""
       ]
     }
   ]

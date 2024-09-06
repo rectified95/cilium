@@ -88,6 +88,8 @@ option is set in the ``scrape_configs`` section:
           replacement: ${1}:${2}
           target_label: __address__
 
+.. _hubble_metrics:
+
 Hubble Metrics
 ==============
 
@@ -118,6 +120,9 @@ section for the full list of available metrics and their options.
 
 The port of the Hubble metrics can be configured with the
 ``hubble.metrics.port`` Helm value.
+
+For details on enabling Hubble metrics with TLS see the
+:ref:`hubble_configure_metrics_tls` section of the documentation.
 
 .. Note::
 
@@ -307,12 +312,14 @@ Name                                       Labels                               
 Node Connectivity
 ~~~~~~~~~~~~~~~~~
 
-========================================== ====================================================================================================================================================================== ========== ===================================================================================================================
-Name                                       Labels                                                                                                                                                                 Default    Description
-========================================== ====================================================================================================================================================================== ========== ===================================================================================================================
-``node_connectivity_status``               ``source_cluster``, ``source_node_name``, ``target_cluster``, ``target_node_name``, ``target_node_type``, ``type``                                                     Enabled    The last observed status of both ICMP and HTTP connectivity between the current Cilium agent and other Cilium nodes
-``node_connectivity_latency_seconds``      ``address_type``, ``protocol``, ``source_cluster``, ``source_node_name``, ``target_cluster``, ``target_node_ip``, ``target_node_name``, ``target_node_type``, ``type`` Enabled    The last observed latency between the current Cilium agent and other Cilium nodes in seconds
-========================================== ====================================================================================================================================================================== ========== ===================================================================================================================
+============================================= ====================================================================================================================================================================== ========== ==================================================================================================================================================================================================================
+Name                                          Labels                                                                                                                                                                 Default    Description
+============================================= ====================================================================================================================================================================== ========== ==================================================================================================================================================================================================================
+``node_connectivity_status``                  ``source_cluster``, ``source_node_name``, ``target_cluster``, ``target_node_name``, ``target_node_type``, ``type``                                                     Enabled    Deprecated, will be removed in Cilium 1.18 - use ``node_health_connectivity_status`` instead. The last observed status of both ICMP and HTTP connectivity between the current Cilium agent and other Cilium nodes
+``node_connectivity_latency_seconds``         ``address_type``, ``protocol``, ``source_cluster``, ``source_node_name``, ``target_cluster``, ``target_node_ip``, ``target_node_name``, ``target_node_type``, ``type`` Enabled    Deprecated, will be removed in Cilium 1.18 - use ``node_health_connectivity_latency_seconds`` instead. The last observed latency between the current Cilium agent and other Cilium nodes in seconds
+``node_health_connectivity_status``           ``source_cluster``, ``source_node_name``, ``type``, ``status``                                                                                                         Enabled    Number of endpoints with last observed status of both ICMP and HTTP connectivity between the current Cilium agent and other Cilium nodes
+``node_health_connectivity_latency_seconds``  ``source_cluster``, ``source_node_name``, ``type``, ``address_type``, ``protocol``                                                                                     Enabled    Histogram of the last observed latency between the current Cilium agent and other Cilium nodes in seconds
+============================================= ====================================================================================================================================================================== ========== ==================================================================================================================================================================================================================
 
 Clustermesh
 ~~~~~~~~~~~

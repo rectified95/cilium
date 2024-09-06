@@ -9,9 +9,13 @@
 package restore
 
 import (
+	"bytes"
 	"fmt"
+	"net/netip"
 	"sort"
 	"testing"
+
+	"github.com/cilium/cilium/pkg/u8proto"
 )
 
 // PortProtoV2 is 1 value at bit position 24.
@@ -29,11 +33,11 @@ const PortProtoV2 = 1 << 24
 // This works because Version 1 will naturally encode
 // no values at postions 16-31 as the original Version 1
 // was a uint16. Version 2 enforces a 1 value at the 24th
-// bit position, so it will alway be legible.
+// bit position, so it will always be legible.
 type PortProto uint32
 
 // MakeV2PortProto returns a Version 2 port protocol.
-func MakeV2PortProto(port uint16, proto uint8) PortProto {
+func MakeV2PortProto(port uint16, proto u8proto.U8proto) PortProto {
 	return PortProto(PortProtoV2 | (uint32(proto) << 16) | uint32(port))
 }
 
@@ -75,7 +79,63 @@ type IPRules []IPRule
 // IPRule stores the allowed destination IPs for a DNS names matching a regex
 type IPRule struct {
 	Re  RuleRegex
-	IPs map[string]struct{} // IPs, nil set is wildcard and allows all IPs!
+	IPs map[RuleIPOrCIDR]struct{} // IPs, nil set is wildcard and allows all IPs!
+}
+
+// RuleIPOrCIDR is one allowed destination IP or CIDR
+// It marshals to/from text in a way that is compatible with net.IP and CIDRs
+type RuleIPOrCIDR netip.Prefix
+
+func ParseRuleIPOrCIDR(s string) (ip RuleIPOrCIDR, err error) {
+	err = ip.UnmarshalText([]byte(s))
+	return
+}
+
+func (ip RuleIPOrCIDR) ContainsAddr(addr RuleIPOrCIDR) bool {
+	return addr.IsAddr() && netip.Prefix(ip).Contains(netip.Prefix(addr).Addr())
+}
+
+func (ip RuleIPOrCIDR) IsAddr() bool {
+	return netip.Prefix(ip).Bits() == -1
+}
+
+func (ip RuleIPOrCIDR) String() string {
+	if ip.IsAddr() {
+		return netip.Prefix(ip).Addr().String()
+	} else {
+		return netip.Prefix(ip).String()
+	}
+}
+
+func (ip RuleIPOrCIDR) ToSingleCIDR() RuleIPOrCIDR {
+	addr := netip.Prefix(ip).Addr()
+	return RuleIPOrCIDR(netip.PrefixFrom(addr, addr.BitLen()))
+}
+
+func (ip RuleIPOrCIDR) MarshalText() ([]byte, error) {
+	if ip.IsAddr() {
+		return netip.Prefix(ip).Addr().MarshalText()
+	} else {
+		return netip.Prefix(ip).MarshalText()
+	}
+}
+
+func (ip *RuleIPOrCIDR) UnmarshalText(b []byte) (err error) {
+	if b == nil {
+		return fmt.Errorf("cannot unmarshal nil into RuleIPOrCIDR")
+	}
+	if i := bytes.IndexByte(b, byte('/')); i < 0 {
+		var addr netip.Addr
+		if err = addr.UnmarshalText(b); err == nil {
+			*ip = RuleIPOrCIDR(netip.PrefixFrom(addr, 0xff))
+		}
+	} else {
+		var prefix netip.Prefix
+		if err = prefix.UnmarshalText(b); err == nil {
+			*ip = RuleIPOrCIDR(prefix)
+		}
+	}
+	return
 }
 
 // RuleRegex is a wrapper for a pointer to a string so that we can define marshalers for it.

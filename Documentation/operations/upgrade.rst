@@ -301,6 +301,7 @@ communicating via the proxy must reconnect to re-establish connections.
   100 QPS/200 Burst. To configure the rate limit for Cilium Operator, use the
   ``--operator-k8s-client-qps`` and ``--operator-k8s-client-burst`` flags or the corresponding
   Helm values.
+* Support for Consul, deprecated since v1.12, has been removed.
 
 Removed Options
 ~~~~~~~~~~~~~~~
@@ -321,8 +322,16 @@ Helm Options
   deprecated in favor of the associated ``existingSecret`` options and will be
   removed in a future release.
 
+Agent Options
+~~~~~~~~~~~~~
+
+* The ``CONNTRACK_LOCAL`` option has been deprecated and will be removed in a
+  future release.
+
 Added Metrics
 ~~~~~~~~~~~~~
+* ``cilium_node_health_connectivity_status``
+* ``cilium_node_health_connectivity_latency_seconds``
 
 Removed Metrics
 ~~~~~~~~~~~~~~~
@@ -330,6 +339,10 @@ Removed Metrics
 Changed Metrics
 ~~~~~~~~~~~~~~~
 
+Deprecated Metrics
+~~~~~~~~~~~~~~~~~~
+* ``cilium_node_connectivity_status`` is now deprecated. Please use ``cilium_node_health_connectivity_status`` instead.
+* ``cilium_node_connectivity_latency_seconds`` is now deprecated. Please use ``cilium_node_health_connectivity_latency_seconds`` instead.
 
 Advanced
 ========

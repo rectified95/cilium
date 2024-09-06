@@ -53,7 +53,7 @@ import (
 	"github.com/cilium/cilium/pkg/maps/neighborsmap"
 	"github.com/cilium/cilium/pkg/maps/nodemap"
 	"github.com/cilium/cilium/pkg/maps/policymap"
-	"github.com/cilium/cilium/pkg/maps/ratelimitmetricsmap"
+	"github.com/cilium/cilium/pkg/maps/ratelimitmap"
 	"github.com/cilium/cilium/pkg/maps/recorder"
 	"github.com/cilium/cilium/pkg/maps/signalmap"
 	"github.com/cilium/cilium/pkg/maps/tunnel"
@@ -229,8 +229,8 @@ func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeC
 	cDefinesMap["CT_CLOSE_TIMEOUT"] = fmt.Sprintf("%d", int64(option.Config.CTMapEntriesTimeoutFIN.Seconds()))
 	cDefinesMap["CT_REPORT_INTERVAL"] = fmt.Sprintf("%d", int64(option.Config.MonitorAggregationInterval.Seconds()))
 	cDefinesMap["CT_REPORT_FLAGS"] = fmt.Sprintf("%#04x", int64(option.Config.MonitorAggregationFlags))
-	cDefinesMap["RATELIMIT_MAP"] = "cilium_ratelimit"
-	cDefinesMap["RATELIMIT_METRICS_MAP"] = ratelimitmetricsmap.MapName
+	cDefinesMap["RATELIMIT_MAP"] = ratelimitmap.MapName
+	cDefinesMap["RATELIMIT_METRICS_MAP"] = ratelimitmap.MetricsMapName
 	cDefinesMap["CT_TAIL_CALL_BUFFER4"] = "cilium_tail_call_buffer4"
 	cDefinesMap["CT_TAIL_CALL_BUFFER6"] = "cilium_tail_call_buffer6"
 	cDefinesMap["PER_CLUSTER_CT_TCP4"] = "cilium_per_cluster_ct_tcp4"
@@ -248,10 +248,6 @@ func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeC
 	cDefinesMap["EVENTS_MAP_RATE_LIMIT"] = fmt.Sprintf("%d", option.Config.BPFEventsDefaultRateLimit)
 	cDefinesMap["EVENTS_MAP_BURST_LIMIT"] = fmt.Sprintf("%d", option.Config.BPFEventsDefaultBurstLimit)
 	cDefinesMap["SIGNAL_MAP"] = signalmap.MapName
-	cDefinesMap["POLICY_CALL_MAP"] = policymap.PolicyCallMapName
-	if option.Config.EnableEnvoyConfig {
-		cDefinesMap["POLICY_EGRESSCALL_MAP"] = policymap.PolicyEgressCallMapName
-	}
 	cDefinesMap["LB6_REVERSE_NAT_MAP"] = "cilium_lb6_reverse_nat"
 	cDefinesMap["LB6_SERVICES_MAP_V2"] = "cilium_lb6_services_v2"
 	cDefinesMap["LB6_BACKEND_MAP"] = "cilium_lb6_backends_v3"
@@ -263,6 +259,7 @@ func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeC
 	cDefinesMap["LB4_REVERSE_NAT_SK_MAP"] = lbmap.SockRevNat4MapName
 	cDefinesMap["LB4_REVERSE_NAT_SK_MAP_SIZE"] = fmt.Sprintf("%d", lbmap.MaxSockRevNat4MapEntries)
 	cDefinesMap["LB4_SKIP_MAP"] = lbmap.SkipLB4MapName
+	cDefinesMap["LB6_SKIP_MAP"] = lbmap.SkipLB6MapName
 
 	if option.Config.EnableSessionAffinity {
 		cDefinesMap["ENABLE_SESSION_AFFINITY"] = "1"
@@ -309,7 +306,7 @@ func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeC
 		cDefinesMap["ENABLE_WIREGUARD"] = "1"
 		ifindex, err := link.GetIfIndex(wgtypes.IfaceName)
 		if err != nil {
-			return err
+			return fmt.Errorf("getting %s ifindex: %w", wgtypes.IfaceName, err)
 		}
 		cDefinesMap["WG_IFINDEX"] = fmt.Sprintf("%d", ifindex)
 
@@ -516,6 +513,7 @@ func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeC
 				cDefinesMap["IPV6_RSS_PREFIX_BITS"] = "128"
 			}
 		}
+
 		if option.Config.NodePortAcceleration != option.NodePortAccelerationDisabled {
 			cDefinesMap["ENABLE_NODEPORT_ACCELERATION"] = "1"
 		}
@@ -544,7 +542,7 @@ func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeC
 
 	macByIfIndexMacro, isL3DevMacro, err := devMacros(nativeDevices)
 	if err != nil {
-		return err
+		return fmt.Errorf("generating device macros: %w", err)
 	}
 	cDefinesMap["NATIVE_DEV_MAC_BY_IFINDEX(IFINDEX)"] = macByIfIndexMacro
 	cDefinesMap["IS_L3_DEV(ifindex)"] = isL3DevMacro
@@ -723,7 +721,7 @@ func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeC
 
 	vlanFilter, err := vlanFilterMacros(nativeDevices)
 	if err != nil {
-		return err
+		return fmt.Errorf("rendering vlan filter macros: %w", err)
 	}
 	cDefinesMap["VLAN_FILTER(ifindex, vlan_id)"] = vlanFilter
 
@@ -758,12 +756,12 @@ func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeC
 
 	ephemeralMin, err := getEphemeralPortRangeMin(h.sysctl)
 	if err != nil {
-		return err
+		return fmt.Errorf("getting ephemeral port range minimun: %w", err)
 	}
 	cDefinesMap["EPHEMERAL_MIN"] = fmt.Sprintf("%d", ephemeralMin)
 
 	if err := cDefinesMap.Merge(h.nodeExtraDefines); err != nil {
-		return err
+		return fmt.Errorf("merging extra node defines: %w", err)
 	}
 
 	for _, fn := range h.nodeExtraDefineFns {
@@ -773,7 +771,7 @@ func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeC
 		}
 
 		if err := cDefinesMap.Merge(defines); err != nil {
-			return err
+			return fmt.Errorf("merging extra node define func results: %w", err)
 		}
 	}
 
@@ -781,14 +779,14 @@ func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeC
 		if option.Config.IPv4Enabled() {
 			ipip4, err := netlink.LinkByName(defaults.IPIPv4Device)
 			if err != nil {
-				return err
+				return fmt.Errorf("looking up link %s: %w", defaults.IPIPv4Device, err)
 			}
 			cDefinesMap["ENCAP4_IFINDEX"] = fmt.Sprintf("%d", ipip4.Attrs().Index)
 		}
 		if option.Config.IPv6Enabled() {
 			ipip6, err := netlink.LinkByName(defaults.IPIPv6Device)
 			if err != nil {
-				return err
+				return fmt.Errorf("looking up link %s: %w", defaults.IPIPv6Device, err)
 			}
 			cDefinesMap["ENCAP6_IFINDEX"] = fmt.Sprintf("%d", ipip6.Attrs().Index)
 		}
@@ -796,6 +794,10 @@ func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeC
 
 	// Write Identity and ClusterID related macros.
 	cDefinesMap["CLUSTER_ID_MAX"] = fmt.Sprintf("%d", option.Config.MaxConnectedClusters)
+
+	if option.Config.LoadBalancerProtocolDifferentiation {
+		cDefinesMap["ENABLE_SERVICE_PROTOCOL_DIFFERENTIATION"] = "1"
+	}
 
 	fmt.Fprint(fw, declareConfig("identity_length", identity.GetClusterIDShift(), "Identity length in bits"))
 	fmt.Fprint(fw, assignConfig("identity_length", identity.GetClusterIDShift()))
@@ -835,7 +837,7 @@ func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeC
 }
 
 func getEphemeralPortRangeMin(sysctl sysctl.Sysctl) (int, error) {
-	ephemeralPortRangeStr, err := sysctl.Read("net.ipv4.ip_local_port_range")
+	ephemeralPortRangeStr, err := sysctl.Read([]string{"net", "ipv4", "ip_local_port_range"})
 	if err != nil {
 		return 0, fmt.Errorf("unable to read net.ipv4.ip_local_port_range: %w", err)
 	}
@@ -874,7 +876,7 @@ func vlanFilterMacros(nativeDevices []*tables.Device) (string, error) {
 
 	links, err := netlink.LinkList()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("listing network interfaces: %w", err)
 	}
 
 	for _, l := range links {

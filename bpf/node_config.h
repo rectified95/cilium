@@ -150,7 +150,6 @@ DEFINE_IPV6(HOST_IP, 0xbe, 0xef, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1, 0x0, 0x0, 0xa, 0x
 #define EVENTS_MAP_BURST_LIMIT 0
 #define SIGNAL_MAP test_cilium_signals
 #define METRICS_MAP test_cilium_metrics
-#define POLICY_CALL_MAP test_cilium_policy
 #define AUTH_MAP test_cilium_auth
 #define CONFIG_MAP test_cilium_runtime_config
 #define IPCACHE_MAP test_cilium_ipcache
@@ -179,6 +178,7 @@ DEFINE_IPV6(HOST_IP, 0xbe, 0xef, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1, 0x0, 0x0, 0xa, 0x
 #define LB4_MAGLEV_MAP_OUTER test_cilium_lb4_maglev_outer
 #define LB6_MAGLEV_MAP_OUTER test_cilium_lb6_maglev_outer
 #define LB4_SKIP_MAP test_cilium_skip_lb4
+#define LB6_SKIP_MAP test_cilium_skip_lb6
 #define THROTTLE_MAP test_cilium_throttle
 #define THROTTLE_MAP_SIZE 65536
 #define ENABLE_ARP_RESPONDER

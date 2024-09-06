@@ -16,6 +16,7 @@ import (
 
 	"github.com/cilium/cilium/operator/pkg/gateway-api/helpers"
 	"github.com/cilium/cilium/operator/pkg/model"
+	"github.com/cilium/cilium/pkg/annotation"
 )
 
 const (
@@ -40,14 +41,25 @@ func GatewayAPI(input Input) ([]model.HTTPListener, []model.TLSPassthroughListen
 	var resHTTP []model.HTTPListener
 	var resTLSPassthrough []model.TLSPassthroughListener
 
-	var labels, annotations map[string]string
+	labels := make(map[string]string)
+	annotations := make(map[string]string)
 	if input.Gateway.Spec.Infrastructure != nil {
 		labels = toMapString(input.Gateway.Spec.Infrastructure.Labels)
 		annotations = toMapString(input.Gateway.Spec.Infrastructure.Annotations)
 	}
-
+	ips := make([]string, 0, len(input.Gateway.Spec.Addresses))
+	for _, address := range input.Gateway.Spec.Addresses {
+		if address.Type == nil || *address.Type == gatewayv1.IPAddressType {
+			ips = append(ips, address.Value)
+		}
+	}
+	// If already use the LBIPAMIPKeyAlias to specify the IP, don't overwrite it.
+	// At a future date this annotation will be removed if no spec.addresses are set.
+	if len(ips) != 0 && annotations[annotation.LBIPAMIPKeyAlias] == "" {
+		annotations[annotation.LBIPAMIPKeyAlias] = strings.Join(ips, ",")
+	}
 	var infra *model.Infrastructure
-	if labels != nil || annotations != nil {
+	if len(labels) != 0 || len(annotations) != 0 {
 		infra = &model.Infrastructure{
 			Labels:      labels,
 			Annotations: annotations,
@@ -315,6 +327,7 @@ func extractRoutes(listenerPort int32, hostnames []string, hr gatewayv1.HTTPRout
 				Rewrite:                rewriteFilter,
 				RequestMirrors:         requestMirrors,
 				Timeout:                toTimeout(rule.Timeouts),
+				Retry:                  toHTTPRetry(rule.Retry),
 			})
 		}
 
@@ -334,6 +347,7 @@ func extractRoutes(listenerPort int32, hostnames []string, hr gatewayv1.HTTPRout
 				Rewrite:                rewriteFilter,
 				RequestMirrors:         requestMirrors,
 				Timeout:                toTimeout(rule.Timeouts),
+				Retry:                  toHTTPRetry(rule.Retry),
 			})
 		}
 	}
@@ -355,6 +369,30 @@ func toTimeout(timeouts *gatewayv1.HTTPRouteTimeouts) model.Timeout {
 			res.Request = model.AddressOf(duration)
 		}
 	}
+	return res
+}
+
+func toHTTPRetry(retry *gatewayv1.HTTPRouteRetry) *model.HTTPRetry {
+	if retry == nil {
+		return nil
+	}
+
+	codes := make([]uint32, 0, len(retry.Codes))
+	for _, c := range retry.Codes {
+		codes = append(codes, uint32(c))
+	}
+
+	res := &model.HTTPRetry{
+		Codes:    codes,
+		Attempts: retry.Attempts,
+	}
+
+	if retry.Backoff != nil {
+		if duration, err := time.ParseDuration(string(*retry.Backoff)); err == nil {
+			res.Backoff = model.AddressOf(duration)
+		}
+	}
+
 	return res
 }
 
@@ -599,8 +637,22 @@ func toHTTPRewriteFilter(rewrite *gatewayv1.HTTPURLRewriteFilter) *model.HTTPURL
 }
 
 func toHTTPRequestMirror(svc corev1.Service, mirror *gatewayv1.HTTPRequestMirrorFilter, ns string) *model.HTTPRequestMirror {
+	var n, d int32 = 100, 100
+
+	switch {
+	case mirror.Percent != nil:
+		n = *mirror.Percent
+	case mirror.Fraction != nil:
+		n = mirror.Fraction.Numerator
+		if mirror.Fraction.Denominator != nil {
+			d = *mirror.Fraction.Denominator
+		}
+	}
+
 	return &model.HTTPRequestMirror{
-		Backend: model.AddressOf(backendRefToModelBackend(svc, mirror.BackendRef, ns)),
+		Backend:     model.AddressOf(backendRefToModelBackend(svc, mirror.BackendRef, ns)),
+		Numerator:   n,
+		Denominator: d,
 	}
 }
 
@@ -757,19 +809,19 @@ func toGRPCHeaderMatch(match gatewayv1.GRPCRouteMatch) []model.KeyValueMatch {
 	}
 	res := make([]model.KeyValueMatch, 0, len(match.Headers))
 	for _, h := range match.Headers {
-		t := gatewayv1.HeaderMatchExact
+		t := gatewayv1.GRPCHeaderMatchExact
 		if h.Type != nil {
 			t = *h.Type
 		}
 		switch t {
-		case gatewayv1.HeaderMatchExact:
+		case gatewayv1.GRPCHeaderMatchExact:
 			res = append(res, model.KeyValueMatch{
 				Key: string(h.Name),
 				Match: model.StringMatch{
 					Exact: h.Value,
 				},
 			})
-		case gatewayv1.HeaderMatchRegularExpression:
+		case gatewayv1.GRPCHeaderMatchRegularExpression:
 			res = append(res, model.KeyValueMatch{
 				Key: string(h.Name),
 				Match: model.StringMatch{
@@ -844,7 +896,7 @@ func toHTTPHeaders(headers []gatewayv1.HTTPHeader) []model.Header {
 	return res
 }
 
-func toMapString(in map[gatewayv1.AnnotationKey]gatewayv1.AnnotationValue) map[string]string {
+func toMapString[K, V ~string](in map[K]V) map[string]string {
 	out := make(map[string]string, len(in))
 	for k, v := range in {
 		out[string(k)] = string(v)
