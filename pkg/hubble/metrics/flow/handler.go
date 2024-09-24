@@ -20,8 +20,8 @@ type flowHandler struct {
 	context *api.ContextOptions
 }
 
-func (h *flowHandler) Init(registry *prometheus.Registry, options []*api.ContextOptionConfig) error {
-	c, err := api.ParseContextOptions(options)
+func (h *flowHandler) Init(registry *prometheus.Registry, options *api.MetricConfig) error {
+	c, err := api.ParseContextOptions(options.ContextOptionConfigs)
 	if err != nil {
 		return err
 	}
@@ -53,6 +53,8 @@ func (h *flowHandler) ListMetricVec() []*prometheus.MetricVec {
 }
 
 func (h *flowHandler) ProcessFlow(ctx context.Context, flow *flowpb.Flow) error {
+	// if h.context.Inc
+
 	labelValues, err := h.context.GetLabelValues(flow)
 	if err != nil {
 		return err

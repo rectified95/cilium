@@ -26,7 +26,7 @@ const (
 
 // Handlers contains all the metrics handlers.
 type Handlers struct {
-	handlers       []Handler
+	handlers       []NamedHandler
 	flowProcessors []FlowProcessor
 }
 
@@ -54,7 +54,7 @@ type Handler interface {
 	// Init must initialize the metric handler by validating and parsing
 	// the options and then registering all required metrics with the
 	// specifies Prometheus registry
-	Init(registry *prometheus.Registry, options []*ContextOptionConfig) error
+	Init(registry *prometheus.Registry, options *MetricConfig) error
 
 	// ListMetricVec returns an array of MetricVec used by a handler
 	ListMetricVec() []*prometheus.MetricVec
@@ -79,12 +79,12 @@ type FlowProcessor interface {
 func NewHandlers(log logrus.FieldLogger, registry *prometheus.Registry, in []NamedHandler) (*Handlers, error) {
 	var handlers Handlers
 	for _, item := range in {
-		handlers.handlers = append(handlers.handlers, item.Handler)
+		handlers.handlers = append(handlers.handlers, item)
 		if fp, ok := item.Handler.(FlowProcessor); ok {
 			handlers.flowProcessors = append(handlers.flowProcessors, fp)
 		}
 
-		if err := item.Handler.Init(registry, item.MetricConfig.ContextOptionConfigs); err != nil {
+		if err := item.Handler.Init(registry, item.MetricConfig); err != nil {
 			return nil, fmt.Errorf("unable to initialize metric '%s': %w", item.Name, err)
 		}
 
@@ -112,8 +112,8 @@ func (h Handlers) ProcessFlow(ctx context.Context, flow *pb.Flow) error {
 // metrics directly associated to pod of the deleted cilium endpoint.
 func (h Handlers) ProcessCiliumEndpointDeletion(endpoint *types.CiliumEndpoint) {
 	for _, h := range h.handlers {
-		for _, mv := range h.ListMetricVec() {
-			if ctx := h.Context(); ctx != nil {
+		for _, mv := range h.Handler.ListMetricVec() {
+			if ctx := h.Handler.Context(); ctx != nil {
 				ctx.DeleteMetricsAssociatedWithPod(endpoint.GetName(), endpoint.GetNamespace(), mv)
 			}
 		}
