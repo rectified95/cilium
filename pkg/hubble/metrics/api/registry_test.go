@@ -39,7 +39,7 @@ type testHandler struct {
 	ListMetricCalled int
 }
 
-func (t *testHandler) Init(registry *prometheus.Registry, options []*ContextOptionConfig) error {
+func (t *testHandler) Init(registry *prometheus.Registry, options *MetricConfig) error {
 	t.InitCalled++
 	return nil
 }
@@ -55,6 +55,10 @@ func (t *testHandler) Context() *ContextOptions {
 func (t *testHandler) ListMetricVec() []*prometheus.MetricVec {
 	t.ListMetricCalled++
 	return []*prometheus.MetricVec{t.counter.MetricVec}
+}
+
+func (t *testHandler) Deinit(registry *prometheus.Registry) {
+	t.InitCalled--
 }
 
 func (t *testHandler) ProcessFlow(ctx context.Context, p *pb.Flow) error {
@@ -99,7 +103,7 @@ func TestRegister(t *testing.T) {
 		//exhaustruct:ignore
 		handlers, err := r.ConfigureHandlers(nil, &Config{})
 		assert.NoError(t, err)
-		assert.Empty(t, handlers.handlers)
+		assert.Empty(t, handlers.Handlers)
 	})
 
 	t.Run("Should register handler", func(t *testing.T) {
@@ -137,7 +141,7 @@ func TestRegister(t *testing.T) {
 
 		handlers.ProcessFlow(context.TODO(), flow1)
 		handlers.ProcessFlow(context.TODO(), flow2)
-		assert.EqualValues(t, 2, handlers.handlers[0].(*testHandler).ProcessCalled)
+		assert.EqualValues(t, 2, handlers.Handlers[0].Handler.(*testHandler).ProcessCalled)
 
 		verifyMetricSeriesExists(t, promRegistry, 2)
 
@@ -147,7 +151,7 @@ func TestRegister(t *testing.T) {
 				Namespace: "foo",
 			},
 		})
-		assert.EqualValues(t, 1, handlers.handlers[0].(*testHandler).ListMetricCalled)
+		assert.EqualValues(t, 1, handlers.Handlers[0].Handler.(*testHandler).ListMetricCalled)
 
 		verifyMetricSeriesExists(t, promRegistry, 1)
 
@@ -157,7 +161,7 @@ func TestRegister(t *testing.T) {
 				Namespace: "bar",
 			},
 		})
-		assert.EqualValues(t, 2, handlers.handlers[0].(*testHandler).ListMetricCalled)
+		assert.EqualValues(t, 2, handlers.Handlers[0].Handler.(*testHandler).ListMetricCalled)
 
 		verifyMetricSeriesNotExists(t, promRegistry)
 	})
@@ -180,7 +184,7 @@ func TestRegister(t *testing.T) {
 
 		handlers.ProcessFlow(context.TODO(), flow1)
 		handlers.ProcessFlow(context.TODO(), flow2)
-		assert.EqualValues(t, 2, handlers.handlers[0].(*testHandler).ProcessCalled)
+		assert.EqualValues(t, 2, handlers.Handlers[0].Handler.(*testHandler).ProcessCalled)
 
 		verifyMetricSeriesExists(t, promRegistry, 1)
 
@@ -190,7 +194,7 @@ func TestRegister(t *testing.T) {
 				Namespace: "foo",
 			},
 		})
-		assert.EqualValues(t, 1, handlers.handlers[0].(*testHandler).ListMetricCalled)
+		assert.EqualValues(t, 1, handlers.Handlers[0].Handler.(*testHandler).ListMetricCalled)
 
 		verifyMetricSeriesExists(t, promRegistry, 1)
 
@@ -200,7 +204,7 @@ func TestRegister(t *testing.T) {
 				Namespace: "bar",
 			},
 		})
-		assert.EqualValues(t, 2, handlers.handlers[0].(*testHandler).ListMetricCalled)
+		assert.EqualValues(t, 2, handlers.Handlers[0].Handler.(*testHandler).ListMetricCalled)
 
 		verifyMetricSeriesExists(t, promRegistry, 1)
 	})
@@ -219,7 +223,7 @@ func TestRegister(t *testing.T) {
 
 		handlers.ProcessFlow(context.TODO(), flow1)
 		handlers.ProcessFlow(context.TODO(), flow2)
-		assert.EqualValues(t, 2, handlers.handlers[0].(*testHandler).ProcessCalled)
+		assert.EqualValues(t, 2, handlers.Handlers[0].Handler.(*testHandler).ProcessCalled)
 
 		verifyMetricSeriesExists(t, promRegistry, 2)
 
@@ -229,7 +233,7 @@ func TestRegister(t *testing.T) {
 				Namespace: "foo",
 			},
 		})
-		assert.EqualValues(t, 1, handlers.handlers[0].(*testHandler).ListMetricCalled)
+		assert.EqualValues(t, 1, handlers.Handlers[0].Handler.(*testHandler).ListMetricCalled)
 
 		verifyMetricSeriesExists(t, promRegistry, 1)
 
@@ -239,7 +243,7 @@ func TestRegister(t *testing.T) {
 				Namespace: "bar",
 			},
 		})
-		assert.EqualValues(t, 2, handlers.handlers[0].(*testHandler).ListMetricCalled)
+		assert.EqualValues(t, 2, handlers.Handlers[0].Handler.(*testHandler).ListMetricCalled)
 
 		verifyMetricSeriesNotExists(t, promRegistry)
 	})
@@ -258,7 +262,7 @@ func TestRegister(t *testing.T) {
 
 		handlers.ProcessFlow(context.TODO(), flow1)
 		handlers.ProcessFlow(context.TODO(), flow2)
-		assert.EqualValues(t, 2, handlers.handlers[0].(*testHandler).ProcessCalled)
+		assert.EqualValues(t, 2, handlers.Handlers[0].Handler.(*testHandler).ProcessCalled)
 
 		verifyMetricSeriesExists(t, promRegistry, 2)
 
@@ -268,7 +272,7 @@ func TestRegister(t *testing.T) {
 				Namespace: "foo",
 			},
 		})
-		assert.EqualValues(t, 1, handlers.handlers[0].(*testHandler).ListMetricCalled)
+		assert.EqualValues(t, 1, handlers.Handlers[0].Handler.(*testHandler).ListMetricCalled)
 
 		verifyMetricSeriesExists(t, promRegistry, 2)
 
@@ -278,7 +282,7 @@ func TestRegister(t *testing.T) {
 				Namespace: "bar",
 			},
 		})
-		assert.EqualValues(t, 2, handlers.handlers[0].(*testHandler).ListMetricCalled)
+		assert.EqualValues(t, 2, handlers.Handlers[0].Handler.(*testHandler).ListMetricCalled)
 
 		verifyMetricSeriesExists(t, promRegistry, 2)
 	})
@@ -309,8 +313,8 @@ func initHandlers(t *testing.T, opts *ContextOptions, promRegistry *prometheus.R
 	}
 	handlers, err := r.ConfigureHandlers(nil, cfg)
 	assert.NoError(t, err)
-	assert.Len(t, handlers.handlers, 1)
-	assert.EqualValues(t, 1, handlers.handlers[0].(*testHandler).InitCalled)
+	assert.Len(t, handlers.Handlers, 1)
+	assert.EqualValues(t, 1, handlers.Handlers[0].Handler.(*testHandler).InitCalled)
 	return handlers
 }
 
