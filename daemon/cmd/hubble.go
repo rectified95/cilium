@@ -199,6 +199,7 @@ func (d *Daemon) launchHubble() {
 
 		// new metricconfig watcher
 		// watcher.reload()/readconfig
+		metrics.NewMetricConfigWatcher(option.Config.HubbleDynamicMetricConfigFilePath)
 
 		err := metrics.InitMetrics(metrics.Registry, api.ParseStaticMetricsConfig(option.Config.HubbleMetrics), grpcMetrics)
 		if err != nil {
