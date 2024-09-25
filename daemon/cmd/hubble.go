@@ -28,7 +28,6 @@ import (
 	"github.com/cilium/cilium/pkg/hubble/exporter"
 	"github.com/cilium/cilium/pkg/hubble/exporter/exporteroption"
 	"github.com/cilium/cilium/pkg/hubble/metrics"
-	"github.com/cilium/cilium/pkg/hubble/metrics/api"
 	"github.com/cilium/cilium/pkg/hubble/monitor"
 	"github.com/cilium/cilium/pkg/hubble/observer"
 	"github.com/cilium/cilium/pkg/hubble/observer/observeroption"
@@ -197,15 +196,14 @@ func (d *Daemon) launchHubble() {
 			"tls":     option.Config.HubbleMetricsServerTLSEnabled,
 		}).Info("Starting Hubble Metrics server")
 
-		// new metricconfig watcher
-		// watcher.reload()/readconfig
-		metrics.NewMetricConfigWatcher(option.Config.HubbleDynamicMetricConfigFilePath)
+		// err := metrics.InitMetrics(metrics.Registry, api.ParseStaticMetricsConfig(option.Config.HubbleMetrics), grpcMetrics)
+		// if err != nil {
+		// 	log.WithError(err).Error("Unable to setup metrics: %w", err)
+		// 	return
+		// }
 
-		err := metrics.InitMetrics(metrics.Registry, api.ParseStaticMetricsConfig(option.Config.HubbleMetrics), grpcMetrics)
-		if err != nil {
-			log.WithError(err).Error("Unable to setup metrics: %w", err)
-			return
-		}
+		// TODO if new configMap defined
+		dynamicFp := metrics.NewDynamicFlowProcessor(logger, option.Config.HubbleDynamicMetricConfigFilePath)
 
 		srv = &http.Server{
 			Addr:    option.Config.HubbleMetricsServer,
@@ -220,15 +218,17 @@ func (d *Daemon) launchHubble() {
 			}
 		}()
 
-		observerOpts = append(observerOpts,
-			observeroption.WithOnDecodedFlowFunc(func(ctx context.Context, flow *flowpb.Flow) (bool, error) {
-				err := metrics.ProcessFlow(ctx, flow)
-				if err != nil {
-					logger.WithError(err).Error("Failed to ProcessFlow in metrics handler")
-				}
-				return false, nil
-			}),
-		)
+		// observerOpts = append(observerOpts,
+		// 	observeroption.WithOnDecodedFlowFunc(func(ctx context.Context, flow *flowpb.Flow) (bool, error) {
+		// 		err := metrics.ProcessFlow(ctx, flow)
+		// 		if err != nil {
+		// 			logger.WithError(err).Error("Failed to ProcessFlow in metrics handler")
+		// 		}
+		// 		return false, nil
+		// 	}),
+		// )
+		// TODO if new configMap defined
+		observerOpts = append(observerOpts, observeroption.WithOnDecodedFlow(dynamicFp))
 
 		localSrvOpts = append(localSrvOpts,
 			serveroption.WithGRPCMetrics(grpcMetrics),

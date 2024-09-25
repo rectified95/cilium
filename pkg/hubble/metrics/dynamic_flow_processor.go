@@ -28,7 +28,7 @@ type DynamicFlowProcessor struct {
 }
 
 // OnDecodedEvent distributes events across all managed exporters.
-func (d *DynamicFlowProcessor) OnDecodedEvent(ctx context.Context, flow *flowpb.Flow) (bool, error) {
+func (d *DynamicFlowProcessor) OnDecodedFlow(ctx context.Context, flow *flowpb.Flow) (bool, error) {
 	select {
 	case <-ctx.Done():
 		// return false, d.Stop()
@@ -39,12 +39,14 @@ func (d *DynamicFlowProcessor) OnDecodedEvent(ctx context.Context, flow *flowpb.
 	d.mutex.RLock()
 	defer d.mutex.RUnlock()
 
-	ProcessFlow(ctx, flow)
-	var errs error
+	errs := ProcessFlow(ctx, flow)
 	// for _, me := range d.managedFlowProcessors {
 	// 	_, err := me.exporter.OnDecodedFlow(ctx, event)
 	// 	errs = errors.Join(errs, err)
 	// }
+	if errs != nil {
+		d.logger.WithError(errs).Error("Failed to ProcessFlow in metrics handler")
+	}
 	return false, errs
 }
 
@@ -65,16 +67,16 @@ func (d *DynamicFlowProcessor) OnDecodedEvent(ctx context.Context, flow *flowpb.
 
 // NewDynamicFlowProcessor creates instance of dynamic hubble flow exporter.
 func NewDynamicFlowProcessor(logger logrus.FieldLogger, configFilePath string) *DynamicFlowProcessor {
-	dynamicExporter := &DynamicFlowProcessor{
+	dynamicFlowProcessor := &DynamicFlowProcessor{
 		logger:                logger,
 		managedFlowProcessors: make(map[string]*managedFlowProcessor),
 	}
 
 	// registerMetrics(dynamicExporter)
 
-	watcher := NewMetricConfigWatcher(configFilePath, dynamicExporter.onConfigReload)
-	dynamicExporter.watcher = watcher
-	return dynamicExporter
+	watcher := NewMetricConfigWatcher(configFilePath, dynamicFlowProcessor.onConfigReload)
+	dynamicFlowProcessor.watcher = watcher
+	return dynamicFlowProcessor
 }
 
 func (d *DynamicFlowProcessor) onConfigReload(ctx context.Context, hash uint64, config api.Config) {
