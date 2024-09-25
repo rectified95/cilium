@@ -9,16 +9,21 @@ import (
 	"strings"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/sirupsen/logrus"
 
 	flowpb "github.com/cilium/cilium/api/v1/flow"
+	"github.com/cilium/cilium/pkg/hubble/filters"
 	"github.com/cilium/cilium/pkg/hubble/metrics/api"
 	"github.com/cilium/cilium/pkg/identity"
 	monitorAPI "github.com/cilium/cilium/pkg/monitor/api"
 )
 
 type policyHandler struct {
-	verdicts *prometheus.CounterVec
-	context  *api.ContextOptions
+	verdicts  *prometheus.CounterVec
+	context   *api.ContextOptions
+	cfg       *api.MetricConfig
+	AllowList filters.FilterFuncs
+	DenyList  filters.FilterFuncs
 }
 
 func (d *policyHandler) Init(registry *prometheus.Registry, options *api.MetricConfig) error {
@@ -27,6 +32,9 @@ func (d *policyHandler) Init(registry *prometheus.Registry, options *api.MetricC
 		return err
 	}
 	d.context = c
+	d.cfg = options
+	d.AllowList, err = filters.BuildFilterList(context.Background(), d.cfg.IncludeFilters, filters.DefaultFilters(logrus.New()))
+	d.DenyList, err = filters.BuildFilterList(context.Background(), d.cfg.ExcludeFilters, filters.DefaultFilters(logrus.New()))
 
 	labels := []string{"direction", "match", "action"}
 	labels = append(labels, d.context.GetLabelNames()...)

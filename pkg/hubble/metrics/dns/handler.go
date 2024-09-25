@@ -9,8 +9,10 @@ import (
 	"strings"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/sirupsen/logrus"
 
 	flowpb "github.com/cilium/cilium/api/v1/flow"
+	"github.com/cilium/cilium/pkg/hubble/filters"
 	"github.com/cilium/cilium/pkg/hubble/metrics/api"
 )
 
@@ -18,7 +20,10 @@ type dnsHandler struct {
 	includeQuery bool
 	ignoreAAAA   bool
 
-	context *api.ContextOptions
+	context   *api.ContextOptions
+	cfg       *api.MetricConfig
+	AllowList filters.FilterFuncs
+	DenyList  filters.FilterFuncs
 
 	queries       *prometheus.CounterVec
 	responses     *prometheus.CounterVec
@@ -31,6 +36,10 @@ func (d *dnsHandler) Init(registry *prometheus.Registry, options *api.MetricConf
 		return err
 	}
 	d.context = c
+	d.cfg = options
+	// TODO use global logger
+	d.AllowList, err = filters.BuildFilterList(context.Background(), d.cfg.IncludeFilters, filters.DefaultFilters(logrus.New()))
+	d.DenyList, err = filters.BuildFilterList(context.Background(), d.cfg.ExcludeFilters, filters.DefaultFilters(logrus.New()))
 
 	for _, opt := range options.ContextOptionConfigs {
 		switch strings.ToLower(opt.Name) {

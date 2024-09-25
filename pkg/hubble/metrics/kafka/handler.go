@@ -7,16 +7,21 @@ import (
 	"context"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/sirupsen/logrus"
 
 	flowpb "github.com/cilium/cilium/api/v1/flow"
+	"github.com/cilium/cilium/pkg/hubble/filters"
 	"github.com/cilium/cilium/pkg/hubble/metrics/api"
 	"github.com/cilium/cilium/pkg/time"
 )
 
 type kafkaHandler struct {
-	requests *prometheus.CounterVec
-	duration *prometheus.HistogramVec
-	context  *api.ContextOptions
+	requests  *prometheus.CounterVec
+	duration  *prometheus.HistogramVec
+	context   *api.ContextOptions
+	cfg       *api.MetricConfig
+	AllowList filters.FilterFuncs
+	DenyList  filters.FilterFuncs
 }
 
 func (h *kafkaHandler) Init(registry *prometheus.Registry, options *api.MetricConfig) error {
@@ -25,6 +30,9 @@ func (h *kafkaHandler) Init(registry *prometheus.Registry, options *api.MetricCo
 		return err
 	}
 	h.context = c
+	h.cfg = options
+	h.AllowList, err = filters.BuildFilterList(context.Background(), h.cfg.IncludeFilters, filters.DefaultFilters(logrus.New()))
+	h.DenyList, err = filters.BuildFilterList(context.Background(), h.cfg.ExcludeFilters, filters.DefaultFilters(logrus.New()))
 
 	h.requests = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: api.DefaultPrometheusNamespace,

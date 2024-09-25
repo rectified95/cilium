@@ -9,9 +9,11 @@ import (
 	"strings"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/sirupsen/logrus"
 
 	flowpb "github.com/cilium/cilium/api/v1/flow"
 	v1 "github.com/cilium/cilium/pkg/hubble/api/v1"
+	"github.com/cilium/cilium/pkg/hubble/filters"
 	"github.com/cilium/cilium/pkg/hubble/metrics/api"
 	pkglabels "github.com/cilium/cilium/pkg/labels"
 )
@@ -25,6 +27,9 @@ const (
 type flowsToWorldHandler struct {
 	flowsToWorld *prometheus.CounterVec
 	context      *api.ContextOptions
+	cfg          *api.MetricConfig
+	AllowList    filters.FilterFuncs
+	DenyList     filters.FilterFuncs
 	anyDrop      bool
 	port         bool
 	synOnly      bool
@@ -36,6 +41,10 @@ func (h *flowsToWorldHandler) Init(registry *prometheus.Registry, options *api.M
 		return err
 	}
 	h.context = c
+	h.cfg = options
+	h.AllowList, err = filters.BuildFilterList(context.Background(), h.cfg.IncludeFilters, filters.DefaultFilters(logrus.New()))
+	h.DenyList, err = filters.BuildFilterList(context.Background(), h.cfg.ExcludeFilters, filters.DefaultFilters(logrus.New()))
+
 	for _, opt := range options.ContextOptionConfigs {
 		switch strings.ToLower(opt.Name) {
 		case "any-drop":
