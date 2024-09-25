@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright Authors of Cilium
 
-package exporter
+package metrics
 
 import (
 	"context"
@@ -23,7 +23,7 @@ var metricReloadInterval = 5 * time.Second
 type metricConfigWatcher struct {
 	logger         logrus.FieldLogger
 	configFilePath string
-	callback       func(ctx context.Context, hash uint64, config api.MetricConfig)
+	callback       func(ctx context.Context, hash uint64, config api.Config)
 	ticker         *time.Ticker
 	stop           chan bool
 }
@@ -31,9 +31,9 @@ type metricConfigWatcher struct {
 // NewmetricConfigWatcher creates a config watcher instance. Config watcher notifies
 // TODO dynamic exporter when config file changes and dynamic metric config should be
 // reconciled.
-func NewmetricConfigWatcher(
+func NewMetricConfigWatcher(
 	configFilePath string,
-	callback func(ctx context.Context, hash uint64, config api.MetricConfig),
+	callback func(ctx context.Context, hash uint64, config api.Config),
 ) *metricConfigWatcher {
 	watcher := &metricConfigWatcher{
 		logger:         logrus.New().WithField(logfields.LogSubsys, "hubble").WithField("configFilePath", configFilePath),
@@ -45,7 +45,7 @@ func NewmetricConfigWatcher(
 	watcher.reload()
 
 	// TODO replace ticker reloads with inotify watchers
-	watcher.ticker = time.NewTicker(reloadInterval)
+	watcher.ticker = time.NewTicker(metricReloadInterval)
 	watcher.stop = make(chan bool)
 
 	go func() {
@@ -66,7 +66,7 @@ func (c *metricConfigWatcher) reload() {
 	c.logger.Debug("Attempting reload")
 	config, hash, err := c.readConfig()
 	if err != nil {
-		DynamicExporterReconfigurations.WithLabelValues("failure").Inc()
+		// DynamicExporterReconfigurations.WithLabelValues("failure").Inc()
 		c.logger.Warnf("failed reading dynamic exporter config")
 	} else {
 		c.callback(context.TODO(), hash, *config)
@@ -81,8 +81,8 @@ func (c *metricConfigWatcher) Stop() {
 	c.stop <- true
 }
 
-func (c *metricConfigWatcher) readConfig() (*api.MetricConfig, uint64, error) {
-	config := &api.MetricConfig{}
+func (c *metricConfigWatcher) readConfig() (*api.Config, uint64, error) {
+	config := &api.Config{}
 	yamlFile, err := os.ReadFile(c.configFilePath)
 	if err != nil {
 		return nil, 0, fmt.Errorf("cannot read file '%s': %w", c.configFilePath, err)
@@ -103,7 +103,7 @@ func calculateMetricHash(file []byte) uint64 {
 	return binary.LittleEndian.Uint64(sum[0:16])
 }
 
-func validateMetricConfig(config *api.MetricConfig) error {
+func validateMetricConfig(config *api.Config) error {
 	// flowlogNames := make(map[string]interface{})
 	// flowlogPaths := make(map[string]interface{})
 

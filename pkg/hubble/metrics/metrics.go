@@ -104,7 +104,7 @@ func initEndpointDeletionHandler() {
 
 // InitMetrics initializes the metrics system
 func InitMetrics(reg *prometheus.Registry, enabled *api.Config, grpcMetrics *grpc_prometheus.ServerMetrics) error {
-	e, err := initMetricHandlers(reg, enabled)
+	e, err := InitMetricHandlers(reg, enabled)
 	if err != nil {
 		return err
 	}
@@ -120,7 +120,7 @@ func InitMetrics(reg *prometheus.Registry, enabled *api.Config, grpcMetrics *grp
 	return nil
 }
 
-func initMetricHandlers(reg *prometheus.Registry, enabled *api.Config) (*api.Handlers, error) {
+func InitMetricHandlers(reg *prometheus.Registry, enabled *api.Config) (*api.Handlers, error) {
 	return api.DefaultRegistry().ConfigureHandlers(reg, enabled)
 }
 

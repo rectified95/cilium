@@ -198,6 +198,8 @@ func (d *Daemon) launchHubble() {
 		}).Info("Starting Hubble Metrics server")
 
 		// new metricconfig watcher
+		// watcher.reload()/readconfig
+
 		err := metrics.InitMetrics(metrics.Registry, api.ParseStaticMetricsConfig(option.Config.HubbleMetrics), grpcMetrics)
 		if err != nil {
 			log.WithError(err).Error("Unable to setup metrics: %w", err)
