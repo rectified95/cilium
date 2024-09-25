@@ -148,3 +148,7 @@ func (h *flowsToWorldHandler) ProcessFlow(_ context.Context, flow *flowpb.Flow) 
 	h.flowsToWorld.WithLabelValues(labels...).Inc()
 	return nil
 }
+
+func (h *flowsToWorldHandler) Deinit(registry *prometheus.Registry) {
+	registry.Unregister(h.flowsToWorld)
+}

@@ -64,6 +64,8 @@ type Handler interface {
 
 	// Status returns the configuration status of the metric handler
 	Status() string
+
+	Deinit(registry *prometheus.Registry)
 }
 
 // FlowProcessor is a metric handler which requires flows to perform metrics

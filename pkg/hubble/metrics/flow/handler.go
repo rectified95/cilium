@@ -61,8 +61,6 @@ func (h *flowHandler) ListMetricVec() []*prometheus.MetricVec {
 }
 
 func (h *flowHandler) ProcessFlow(ctx context.Context, flow *flowpb.Flow) error {
-	// if h.context.Inc
-
 	labelValues, err := h.context.GetLabelValues(flow)
 	if err != nil {
 		return err
@@ -101,4 +99,8 @@ func (h *flowHandler) ProcessFlow(ctx context.Context, flow *flowpb.Flow) error 
 
 	h.flows.WithLabelValues(labels...).Inc()
 	return nil
+}
+
+func (h *flowHandler) Deinit(registry *prometheus.Registry) {
+	registry.Unregister(h.flows)
 }

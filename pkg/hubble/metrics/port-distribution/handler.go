@@ -98,3 +98,7 @@ func (h *portDistributionHandler) ProcessFlow(ctx context.Context, flow *flowpb.
 	}
 	return nil
 }
+
+func (h *portDistributionHandler) Deinit(registry *prometheus.Registry) {
+	registry.Unregister(h.portDistribution)
+}

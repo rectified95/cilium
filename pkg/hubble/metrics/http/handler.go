@@ -204,3 +204,9 @@ func observerObserve(o prometheus.Observer, value float64, traceID string) {
 		o.Observe(value)
 	}
 }
+
+func (h *httpHandler) Deinit(registry *prometheus.Registry) {
+	registry.Unregister(h.requests)
+	registry.Unregister(h.responses)
+	registry.Unregister(h.duration)
+}

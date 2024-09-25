@@ -83,3 +83,7 @@ func (h *icmpHandler) ProcessFlow(ctx context.Context, flow *flowpb.Flow) error 
 
 	return nil
 }
+
+func (h *icmpHandler) Deinit(registry *prometheus.Registry) {
+	registry.Unregister(h.icmp)
+}

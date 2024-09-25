@@ -119,3 +119,7 @@ func (d *policyHandler) ProcessFlowL7(ctx context.Context, flow *flowpb.Flow) er
 	d.verdicts.WithLabelValues(labels...).Inc()
 	return nil
 }
+
+func (h *policyHandler) Deinit(registry *prometheus.Registry) {
+	registry.Unregister(h.verdicts)
+}
