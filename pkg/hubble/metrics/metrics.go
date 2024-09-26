@@ -4,7 +4,6 @@
 package metrics
 
 import (
-	"context"
 	"crypto/tls"
 	"net/http"
 
@@ -15,7 +14,6 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	pb "github.com/cilium/cilium/api/v1/flow"
 	"github.com/cilium/cilium/pkg/crypto/certloader"
 	"github.com/cilium/cilium/pkg/hubble/metrics/api"
 	_ "github.com/cilium/cilium/pkg/hubble/metrics/dns"               // invoke init
@@ -70,12 +68,12 @@ var (
 )
 
 // ProcessFlow processes a flow and updates metrics
-func ProcessFlow(ctx context.Context, flow *pb.Flow) error {
-	if enabledMetrics != nil {
-		return enabledMetrics.ProcessFlow(ctx, flow)
-	}
-	return nil
-}
+// func ProcessFlow(ctx context.Context, flow *pb.Flow) error {
+// 	if enabledMetrics != nil {
+// 		return enabledMetrics.ProcessFlow(ctx, flow)
+// 	}
+// 	return nil
+// }
 
 func ProcessCiliumEndpointDeletion(pod *types.CiliumEndpoint) error {
 	if endpointDeletionHandler != nil && enabledMetrics != nil {
@@ -110,6 +108,17 @@ func InitMetrics(reg *prometheus.Registry, enabled *api.Config, grpcMetrics *grp
 	}
 	enabledMetrics = e
 
+	reg.MustRegister(grpcMetrics)
+	reg.MustRegister(LostEvents)
+	reg.MustRegister(RequestsTotal)
+	reg.MustRegister(RequestDuration)
+
+	initEndpointDeletionHandler()
+
+	return nil
+}
+
+func InitHubbleInternalMetrics(reg *prometheus.Registry, grpcMetrics *grpc_prometheus.ServerMetrics) error {
 	reg.MustRegister(grpcMetrics)
 	reg.MustRegister(LostEvents)
 	reg.MustRegister(RequestsTotal)

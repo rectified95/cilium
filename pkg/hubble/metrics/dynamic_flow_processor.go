@@ -39,7 +39,10 @@ func (d *DynamicFlowProcessor) OnDecodedFlow(ctx context.Context, flow *flowpb.F
 	d.mutex.RLock()
 	defer d.mutex.RUnlock()
 
-	errs := ProcessFlow(ctx, flow)
+	var errs error
+	if enabledMetrics != nil {
+		errs = enabledMetrics.ProcessFlow(ctx, flow)
+	}
 	// for _, me := range d.managedFlowProcessors {
 	// 	_, err := me.exporter.OnDecodedFlow(ctx, event)
 	// 	errs = errors.Join(errs, err)
@@ -84,7 +87,12 @@ func (d *DynamicFlowProcessor) onConfigReload(ctx context.Context, hash uint64, 
 	defer d.mutex.Unlock()
 
 	// TODO For now always init all metrics.
-	InitMetricHandlers(Registry, &config)
+	e, err := InitMetricHandlers(Registry, &config)
+	if err != nil {
+		// 	return err
+	}
+	enabledMetrics = e
+	// TODO add error return
 
 	// quick hash comparison to avoid all processing below, even if without stats
 

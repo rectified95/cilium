@@ -26,13 +26,6 @@ import (
 	monitorAPI "github.com/cilium/cilium/pkg/monitor/api"
 )
 
-func TestUninitializedMetrics(t *testing.T) {
-	enabledMetrics = nil
-	endpointDeletionHandler = nil
-	ProcessFlow(context.TODO(), &pb.Flow{})
-	ProcessCiliumEndpointDeletion(&types.CiliumEndpoint{})
-}
-
 func TestInitializedMetrics(t *testing.T) {
 	t.Run("Should send pod removal to delayed delivery queue", func(t *testing.T) {
 		deletedEndpoint := &types.CiliumEndpoint{

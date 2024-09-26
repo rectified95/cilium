@@ -203,6 +203,7 @@ func (d *Daemon) launchHubble() {
 		// }
 
 		// TODO if new configMap defined
+		metrics.InitHubbleInternalMetrics(metrics.Registry, grpcMetrics)
 		dynamicFp := metrics.NewDynamicFlowProcessor(logger, option.Config.HubbleDynamicMetricConfigFilePath)
 
 		srv = &http.Server{
