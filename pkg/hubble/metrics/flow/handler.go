@@ -9,6 +9,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	flowpb "github.com/cilium/cilium/api/v1/flow"
 	v1 "github.com/cilium/cilium/pkg/hubble/api/v1"
@@ -61,6 +62,10 @@ func (h *flowHandler) ListMetricVec() []*prometheus.MetricVec {
 }
 
 func (h *flowHandler) ProcessFlow(ctx context.Context, flow *flowpb.Flow) error {
+	if !filters.Apply(h.AllowList, h.DenyList, &v1.Event{Event: flow, Timestamp: &timestamppb.Timestamp{}}) {
+		return nil
+	}
+
 	labelValues, err := h.context.GetLabelValues(flow)
 	if err != nil {
 		return err

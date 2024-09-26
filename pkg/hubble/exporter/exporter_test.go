@@ -147,10 +147,6 @@ func TestExporterWithFilters(t *testing.T) {
 `, buf.String())
 }
 
-// func TestDynamicMetricConfig(t *testing.T) {
-
-// }
-
 func TestEventToExportEvent(t *testing.T) {
 	// override node name for unit test.
 	nodeName := nodeTypes.GetName()
