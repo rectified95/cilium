@@ -116,3 +116,68 @@ func TestHubbleServerStandalone(t *testing.T) {
 			"hubble_drop_total":            {"destination", "protocol", "reason", "source"},
 			"hubble_flows_processed_total": {"protocol", "source_ip", "subtype", "type", "verdict"}})
 }
+
+func TestReadMetricConfigFromCM(t *testing.T) {
+	watcher := metricConfigWatcher{configFilePath: "testdata/valid_metric_config.yaml"}
+	cfg, _, err := watcher.readConfig()
+	require.Nil(t, err)
+
+	expectedConfigs := []api.MetricConfig{
+		{
+			Name: "drop",
+			ContextOptionConfigs: []*api.ContextOptionConfig{
+				{
+					Name:   "labelsContext",
+					Values: []string{"source_namespace", "source_pod"},
+				},
+			},
+			IncludeFilters: []*pb.FlowFilter{
+				{
+					SourcePod: []string{"default/"},
+				},
+				{
+					DestinationPod: []string{"frontend/pod1"},
+				},
+			},
+			ExcludeFilters: []*pb.FlowFilter{},
+		},
+		{
+			Name: "flow",
+			ContextOptionConfigs: []*api.ContextOptionConfig{
+				{
+					Name:   "destinationContext",
+					Values: []string{"dns", "ip"},
+				},
+			},
+			IncludeFilters: []*pb.FlowFilter{},
+			ExcludeFilters: []*pb.FlowFilter{},
+		},
+	}
+
+	for i := range expectedConfigs {
+		assertFlowLogConfig(t, expectedConfigs[i], *cfg.Metrics[i])
+	}
+}
+
+func assertFlowLogConfig(t *testing.T, expected, actual api.MetricConfig) {
+	// TODO validate name comes from valid set of metric handler names
+	assert.Equal(t, expected.Name, actual.Name)
+
+	assert.Equal(t, len(expected.ContextOptionConfigs), len(actual.ContextOptionConfigs))
+	for i, c := range expected.ContextOptionConfigs {
+		assert.Equal(t, expected.ContextOptionConfigs[i].Name, actual.ContextOptionConfigs[i].Name)
+		for j, s := range c.Values {
+			assert.Equal(t, expected.ContextOptionConfigs[i].Values[j], s)
+		}
+	}
+
+	assert.Equal(t, len(expected.IncludeFilters), len(actual.IncludeFilters))
+	for i := range expected.IncludeFilters {
+		assert.Equal(t, expected.IncludeFilters[i].String(), actual.IncludeFilters[i].String())
+	}
+
+	assert.Equal(t, len(expected.ExcludeFilters), len(actual.ExcludeFilters))
+	for i := range expected.ExcludeFilters {
+		assert.Equal(t, expected.ExcludeFilters[i].String(), actual.ExcludeFilters[i].String())
+	}
+}

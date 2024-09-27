@@ -1,0 +1,15 @@
+metrics:
+- name: "drop"
+  contextOptions:
+  - name: "labelsContext"
+    values: ["source_namespace", "source_pod"]
+  includeFilters:
+  - source_pod: ["default/"]
+  - destination_pod: ["frontend/pod1"]
+  excludeFilters: []
+- name: "flow"
+  contextOptions:
+  - name: "destinationContext"
+    values: ["dns", "ip"]
+# try here: contextOptions
+
