@@ -26,7 +26,7 @@ const (
 
 // Handlers contains all the metrics handlers.
 type Handlers struct {
-	handlers []NamedHandler
+	Handlers []NamedHandler
 	// handlers       []Handler
 	flowProcessors []FlowProcessor
 }
@@ -82,7 +82,7 @@ type FlowProcessor interface {
 func NewHandlers(log logrus.FieldLogger, registry *prometheus.Registry, in []NamedHandler) (*Handlers, error) {
 	var handlers Handlers
 	for _, item := range in {
-		handlers.handlers = append(handlers.handlers, item)
+		handlers.Handlers = append(handlers.Handlers, item)
 		if fp, ok := item.Handler.(FlowProcessor); ok {
 			handlers.flowProcessors = append(handlers.flowProcessors, fp)
 		}
@@ -114,7 +114,7 @@ func (h Handlers) ProcessFlow(ctx context.Context, flow *pb.Flow) error {
 // ProcessCiliumEndpointDeletion queries all handlers for a list of MetricVec and removes
 // metrics directly associated to pod of the deleted cilium endpoint.
 func (h Handlers) ProcessCiliumEndpointDeletion(endpoint *types.CiliumEndpoint) {
-	for _, h := range h.handlers {
+	for _, h := range h.Handlers {
 		for _, mv := range h.Handler.ListMetricVec() {
 			if ctx := h.Handler.Context(); ctx != nil {
 				ctx.DeleteMetricsAssociatedWithPod(endpoint.GetName(), endpoint.GetNamespace(), mv)

@@ -24,7 +24,8 @@ type DynamicFlowProcessor struct {
 	managedFlowProcessors map[string]*managedFlowProcessor
 	// mutex protects from concurrent modification of managedFlowProcessors by config
 	// reloader when hubble events are processed
-	mutex lock.RWMutex
+	mutex   lock.RWMutex
+	Metrics *api.Handlers // TODO add getnames for testing encapsulation?
 }
 
 // OnDecodedEvent distributes events across all managed exporters.
@@ -43,30 +44,12 @@ func (d *DynamicFlowProcessor) OnDecodedFlow(ctx context.Context, flow *flowpb.F
 	if enabledMetrics != nil {
 		errs = enabledMetrics.ProcessFlow(ctx, flow)
 	}
-	// for _, me := range d.managedFlowProcessors {
-	// 	_, err := me.exporter.OnDecodedFlow(ctx, event)
-	// 	errs = errors.Join(errs, err)
-	// }
+
 	if errs != nil {
 		d.logger.WithError(errs).Error("Failed to ProcessFlow in metrics handler")
 	}
 	return false, errs
 }
-
-// Stop stops configuration watcher  and all managed flow log exporters.
-// func (d *DynamicFlowProcessor) Stop() error {
-// 	d.watcher.Stop()
-
-// 	d.mutex.Lock()
-// 	defer d.mutex.Unlock()
-
-// 	var errs error
-// 	for _, me := range d.managedFlowProcessors {
-// 		errs = errors.Join(errs, me.exporter.Stop())
-// 	}
-
-// 	return errs
-// }
 
 // NewDynamicFlowProcessor creates instance of dynamic hubble flow exporter.
 func NewDynamicFlowProcessor(logger logrus.FieldLogger, configFilePath string) *DynamicFlowProcessor {
@@ -82,19 +65,28 @@ func NewDynamicFlowProcessor(logger logrus.FieldLogger, configFilePath string) *
 	return dynamicFlowProcessor
 }
 
-func (d *DynamicFlowProcessor) onConfigReload(ctx context.Context, hash uint64, config api.Config) {
+func (d *DynamicFlowProcessor) onConfigReload(ctx context.Context, isSameHash bool, hash uint64, config api.Config) {
+	if isSameHash {
+		return
+	}
+
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
 
-	// TODO For now always init all metrics.
+	// TODO deinit only diff
+	if d.Metrics != nil {
+		for _, m := range d.Metrics.Handlers {
+			m.Handler.Deinit(Registry)
+		}
+	}
+
 	e, err := InitMetricHandlers(Registry, &config)
 	if err != nil {
 		// 	return err
 	}
-	enabledMetrics = e
-	// TODO add error return
+	d.Metrics = e
 
-	// quick hash comparison to avoid all processing below, even if without stats
+	// TODO add error return
 
 	// configuredFlowLogNames := make(map[string]interface{})
 	// for _, flowlog := range config.FlowLogs {

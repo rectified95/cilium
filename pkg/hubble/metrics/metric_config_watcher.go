@@ -18,33 +18,36 @@ import (
 	"github.com/cilium/cilium/pkg/time"
 )
 
-var metricReloadInterval = 5 * time.Second
+var metricReloadInterval = 10 * time.Second
 
 type metricConfigWatcher struct {
 	logger         logrus.FieldLogger
 	configFilePath string
-	callback       func(ctx context.Context, hash uint64, config api.Config)
+	callback       func(ctx context.Context, isSameHash bool, hash uint64, config api.Config)
 	ticker         *time.Ticker
 	stop           chan bool
+	currentCfgHash uint64
 }
 
 // NewmetricConfigWatcher creates a config watcher instance. Config watcher notifies
-// TODO dynamic exporter when config file changes and dynamic metric config should be
+// DynamicFlowProcessor when config file changes and dynamic metric config should be
 // reconciled.
 func NewMetricConfigWatcher(
 	configFilePath string,
-	callback func(ctx context.Context, hash uint64, config api.Config),
+	callback func(ctx context.Context, isSameHash bool, hash uint64, config api.Config),
 ) *metricConfigWatcher {
 	watcher := &metricConfigWatcher{
 		logger:         logrus.New().WithField(logfields.LogSubsys, "hubble").WithField("configFilePath", configFilePath),
 		configFilePath: configFilePath,
 		callback:       callback,
+		currentCfgHash: 0,
 	}
 
 	// initial configuration load
 	watcher.reload()
 
 	// TODO replace ticker reloads with inotify watchers
+	// https://pkg.go.dev/k8s.io/utils/inotify
 	watcher.ticker = time.NewTicker(metricReloadInterval)
 	watcher.stop = make(chan bool)
 
@@ -64,12 +67,11 @@ func NewMetricConfigWatcher(
 
 func (c *metricConfigWatcher) reload() {
 	c.logger.Debug("Attempting reload")
-	config, hash, err := c.readConfig()
+	config, isSameHash, hash, err := c.readConfig()
 	if err != nil {
-		// DynamicExporterReconfigurations.WithLabelValues("failure").Inc()
 		c.logger.Warnf("failed reading dynamic exporter config")
 	} else {
-		c.callback(context.TODO(), hash, *config)
+		c.callback(context.TODO(), isSameHash, hash, *config)
 	}
 }
 
@@ -81,21 +83,22 @@ func (c *metricConfigWatcher) Stop() {
 	c.stop <- true
 }
 
-func (c *metricConfigWatcher) readConfig() (*api.Config, uint64, error) {
+func (c *metricConfigWatcher) readConfig() (*api.Config, bool, uint64, error) {
 	config := &api.Config{}
 	yamlFile, err := os.ReadFile(c.configFilePath)
 	if err != nil {
-		return nil, 0, fmt.Errorf("cannot read file '%s': %w", c.configFilePath, err)
+		return nil, false, 0, fmt.Errorf("cannot read file '%s': %w", c.configFilePath, err)
 	}
 	if err := yaml.Unmarshal(yamlFile, config); err != nil {
-		return nil, 0, fmt.Errorf("cannot parse yaml: %w", err)
+		return nil, false, 0, fmt.Errorf("cannot parse yaml: %w", err)
 	}
 
 	if err := validateMetricConfig(config); err != nil {
-		return nil, 0, fmt.Errorf("invalid yaml config file: %w", err)
+		return nil, false, 0, fmt.Errorf("invalid yaml config file: %w", err)
 	}
 
-	return config, calculateMetricHash(yamlFile), nil
+	newHash := calculateMetricHash(yamlFile)
+	return config, newHash != c.currentCfgHash, newHash, nil
 }
 
 func calculateMetricHash(file []byte) uint64 {
@@ -104,37 +107,5 @@ func calculateMetricHash(file []byte) uint64 {
 }
 
 func validateMetricConfig(config *api.Config) error {
-	// flowlogNames := make(map[string]interface{})
-	// flowlogPaths := make(map[string]interface{})
-
-	// var errs error
-
-	// for i := range config.FlowLogs {
-	// 	if config.FlowLogs[i] == nil {
-	// 		errs = errors.Join(errs, fmt.Errorf("invalid flowlog at index %d", i))
-	// 		continue
-	// 	}
-	// 	name := config.FlowLogs[i].Name
-	// 	if name == "" {
-	// 		errs = errors.Join(errs, fmt.Errorf("name is required"))
-	// 	} else {
-	// 		if _, ok := flowlogNames[name]; ok {
-	// 			errs = errors.Join(errs, fmt.Errorf("duplicated flowlog name %s", name))
-	// 		}
-	// 		flowlogNames[name] = struct{}{}
-	// 	}
-
-	// 	filePath := config.FlowLogs[i].FilePath
-	// 	if filePath == "" {
-	// 		errs = errors.Join(errs, fmt.Errorf("filePath is required"))
-	// 	} else {
-	// 		if _, ok := flowlogPaths[filePath]; ok {
-	// 			errs = errors.Join(errs, fmt.Errorf("duplicated flowlog path %s", filePath))
-	// 		}
-	// 		flowlogPaths[filePath] = struct{}{}
-	// 	}
-	// }
-
-	// return errs
 	return nil
 }

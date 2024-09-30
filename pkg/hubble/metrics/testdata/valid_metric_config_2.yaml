@@ -7,3 +7,7 @@ metrics:
   - source_pod: ["default/"]
   - destination_pod: ["frontend/pod1"]
   excludeFilters: []
+- name: "flow"
+  contextOptions:
+  - name: "destinationContext"
+    values: ["dns", "ip"]

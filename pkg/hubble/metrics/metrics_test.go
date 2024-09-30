@@ -118,8 +118,8 @@ func TestHubbleServerStandalone(t *testing.T) {
 }
 
 func TestReadMetricConfigFromCM(t *testing.T) {
-	watcher := metricConfigWatcher{configFilePath: "testdata/valid_metric_config.yaml"}
-	cfg, _, err := watcher.readConfig()
+	watcher := metricConfigWatcher{configFilePath: "testdata/valid_metric_config_2.yaml"}
+	cfg, _, _, err := watcher.readConfig()
 	require.Nil(t, err)
 
 	expectedConfigs := []api.MetricConfig{
@@ -155,12 +155,11 @@ func TestReadMetricConfigFromCM(t *testing.T) {
 	}
 
 	for i := range expectedConfigs {
-		assertFlowLogConfig(t, expectedConfigs[i], *cfg.Metrics[i])
+		assertMetricConfig(t, expectedConfigs[i], *cfg.Metrics[i])
 	}
 }
 
-func assertFlowLogConfig(t *testing.T, expected, actual api.MetricConfig) {
-	// TODO validate name comes from valid set of metric handler names
+func assertMetricConfig(t *testing.T, expected, actual api.MetricConfig) {
 	assert.Equal(t, expected.Name, actual.Name)
 
 	assert.Equal(t, len(expected.ContextOptionConfigs), len(actual.ContextOptionConfigs))
@@ -181,3 +180,34 @@ func assertFlowLogConfig(t *testing.T, expected, actual api.MetricConfig) {
 		assert.Equal(t, expected.ExcludeFilters[i].String(), actual.ExcludeFilters[i].String())
 	}
 }
+
+func TestMetricsUpdatedOnConfigChange(t *testing.T) {
+	watcher := metricConfigWatcher{configFilePath: "testdata/valid_metric_config.yaml"}
+	cfg, _, _, err := watcher.readConfig()
+	require.Nil(t, err)
+
+	dfp := DynamicFlowProcessor{}
+	assert.Nil(t, dfp.Metrics)
+	dfp.onConfigReload(context.TODO(), false, 0, *cfg)
+	assertMetricsConfigured(t, &dfp, cfg)
+
+	watcher = metricConfigWatcher{configFilePath: "testdata/valid_metric_config_2.yaml"}
+	cfg, _, _, err = watcher.readConfig()
+	require.Nil(t, err)
+
+	dfp.onConfigReload(context.TODO(), false, 0, *cfg)
+	assertMetricsConfigured(t, &dfp, cfg)
+}
+
+func assertMetricsConfigured(t *testing.T, dfp *DynamicFlowProcessor, cfg *api.Config) {
+	names := cfg.GetMetricNames()
+	assert.Equal(t, len(names), len(dfp.Metrics.Handlers))
+	for _, m := range dfp.Metrics.Handlers {
+		_, ok := names[m.Name]
+		assert.True(t, ok)
+	}
+}
+
+// test scenarios:
+// a. manual config reload in: check enabledMetrics has changed
+// b.
