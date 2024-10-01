@@ -7,6 +7,7 @@ import (
 	"context"
 	"reflect"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
 
 	flowpb "github.com/cilium/cilium/api/v1/flow"
@@ -19,22 +20,23 @@ import (
 // DynamicFlowProcessor represents instance of hubble exporter with dynamic
 // configuration reload.
 type DynamicFlowProcessor struct {
-	// FlowLogExporter
 	logger  logrus.FieldLogger
 	watcher *metricConfigWatcher
 	// namedFps      map[string]*api.NamedFp
 	// namedHandlers map[string]*api.NamedHandler // TODO move config from handler to here and use this type instead
+
 	// mutex protects from concurrent modification of managedFlowProcessors by config
 	// reloader when hubble events are processed
-	mutex   lock.RWMutex
-	Metrics *api.Handlers // TODO add getnames for testing encapsulation?
+	mutex lock.RWMutex
+	// TODO remove Metrics and use named maps above; refactor helper funcs
+	Metrics  *api.Handlers // TODO add getnames for testing encapsulation?
+	registry *prometheus.Registry
 }
 
 // OnDecodedEvent distributes events across all managed exporters.
 func (d *DynamicFlowProcessor) OnDecodedFlow(ctx context.Context, flow *flowpb.Flow) (bool, error) {
 	select {
 	case <-ctx.Done():
-		// return false, d.Stop()
 		return false, nil
 	default:
 	}
@@ -44,9 +46,6 @@ func (d *DynamicFlowProcessor) OnDecodedFlow(ctx context.Context, flow *flowpb.F
 
 	var errs error
 	// TODO move filtering from each handler here
-	// if enabledMetrics != nil {
-	// 	errs = enabledMetrics.ProcessFlow(ctx, flow)
-	// }
 	if d.Metrics != nil {
 		d.Metrics.ProcessFlow(ctx, flow)
 	}
@@ -58,11 +57,12 @@ func (d *DynamicFlowProcessor) OnDecodedFlow(ctx context.Context, flow *flowpb.F
 }
 
 // NewDynamicFlowProcessor creates instance of dynamic hubble flow exporter.
-func NewDynamicFlowProcessor(logger logrus.FieldLogger, configFilePath string) *DynamicFlowProcessor {
+func NewDynamicFlowProcessor(reg *prometheus.Registry, logger logrus.FieldLogger, configFilePath string) *DynamicFlowProcessor {
 	dynamicFlowProcessor := &DynamicFlowProcessor{
 		logger: logger,
 		// namedHandlers: make(map[string]*api.NamedHandler),
 		// namedFps:      make(map[string]*api.NamedFp),
+		registry: reg,
 	}
 	watcher := NewMetricConfigWatcher(configFilePath, dynamicFlowProcessor.onConfigReload)
 	dynamicFlowProcessor.watcher = watcher
@@ -77,22 +77,6 @@ func (d *DynamicFlowProcessor) onConfigReload(ctx context.Context, isSameHash bo
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
 
-	// //// START deinit all, TODO only diff
-	// if d.Metrics != nil {
-	// 	for _, m := range d.Metrics.Handlers {
-	// 		m.Handler.Deinit(Registry)
-	// 	}
-	// }
-
-	// enabledHandlers, err := InitMetricHandlers(Registry, &config)
-	// if err != nil {
-	// 	// 	return err
-	// }
-	// d.Metrics = enabledHandlers
-	// //// END deinit all
-	// // also ^ breaks conflicting plugins detection.. need to do one by one as below :()
-
-	//////
 	var newHandlers api.Handlers
 	metricNames := config.GetMetricNames()
 
@@ -111,7 +95,7 @@ func (d *DynamicFlowProcessor) onConfigReload(ctx context.Context, isSameHash bo
 		for _, m := range d.Metrics.Handlers {
 			if _, ok := configuredMetricNames[m.Name]; !ok {
 				h, _ := curHandlerMap[m.Name]
-				h.Handler.Deinit(Registry)
+				h.Handler.Deinit(d.registry)
 				delete(curHandlerMap, m.Name)
 			}
 		}
@@ -130,26 +114,26 @@ func (d *DynamicFlowProcessor) onConfigReload(ctx context.Context, isSameHash bo
 				continue
 			} else {
 				if h, ok := curHandlerMap[cm.Name]; ok {
-					h.Handler.Deinit(Registry)
+					h.Handler.Deinit(d.registry)
 				}
-				d.applyNewConfig(cm, metricNames, &newHandlers)
+				d.applyNewConfig(d.registry, cm, metricNames, &newHandlers)
 			}
 		} else {
 			// New handler found in config.
-			d.applyNewConfig(cm, metricNames, &newHandlers)
+			d.applyNewConfig(d.registry, cm, metricNames, &newHandlers)
 		}
 	}
 	d.Metrics = &newHandlers
 }
 
-func (d *DynamicFlowProcessor) applyNewConfig(cm *api.MetricConfig, metricNames map[string]struct{}, newMetrics *api.Handlers) {
+func (d *DynamicFlowProcessor) applyNewConfig(reg *prometheus.Registry, cm *api.MetricConfig, metricNames map[string]struct{}, newMetrics *api.Handlers) {
 	// TODO locks?
-	nh, err := api.DefaultRegistry().ConfigureHandler(Registry, cm, &metricNames)
+	nh, err := api.DefaultRegistry().ConfigureHandler(reg, cm, &metricNames)
 	if err != nil {
 		panic(err)
 	}
-	// TODO later remove Metrics and refactor helper funcs
-	err = api.NewHandler(d.logger, Registry, nh, newMetrics)
+
+	err = api.NewHandler(d.logger, reg, nh, newMetrics)
 	if err != nil {
 		panic(err)
 	}

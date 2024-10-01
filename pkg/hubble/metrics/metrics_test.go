@@ -5,6 +5,8 @@ package metrics
 
 import (
 	"context"
+	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -14,7 +16,6 @@ import (
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/expfmt"
-	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/client-go/util/workqueue"
@@ -57,8 +58,6 @@ func SetUpTestMetricsServer(reg *prometheus.Registry) *httptest.Server {
 
 func ConfigureAndFetchMetrics(t *testing.T, testName string, metricCfg []string, exportedMetrics map[string][]string) {
 	t.Run(testName, func(t *testing.T) {
-		log := logrus.New()
-
 		reg := prometheus.NewPedanticRegistry()
 		srv := SetUpTestMetricsServer(reg)
 		defer srv.Close()
@@ -87,23 +86,7 @@ func ConfigureAndFetchMetrics(t *testing.T, testName string, metricCfg []string,
 		require.Nil(t, err)
 		require.Equal(t, http.StatusOK, resp.StatusCode)
 
-		var parser expfmt.TextParser
-		mfMap, err := parser.TextToMetricFamilies(resp.Body)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		for metricName, metricFamily := range mfMap {
-			_, ok := exportedMetrics[metricName]
-			require.NotEmpty(t, ok)
-
-			labels := []string{}
-			for _, labelPair := range metricFamily.Metric[0].Label {
-				labels = append(labels, *(labelPair.Name))
-			}
-			sort.Strings(labels)
-			require.Equal(t, labels, exportedMetrics[metricName])
-		}
+		assertMetricsFromServer(t, resp.Body, exportedMetrics)
 	})
 }
 
@@ -133,10 +116,10 @@ func TestReadMetricConfigFromCM(t *testing.T) {
 			},
 			IncludeFilters: []*pb.FlowFilter{
 				{
-					SourcePod: []string{"default/"},
+					SourcePod: []string{"allow/src_pod"},
 				},
 				{
-					DestinationPod: []string{"frontend/pod1"},
+					DestinationPod: []string{"allow/dst_pod"},
 				},
 			},
 			ExcludeFilters: []*pb.FlowFilter{},
@@ -188,7 +171,8 @@ func TestMetricsUpdatedOnConfigChange(t *testing.T) {
 	cfg, _, _, err := watcher.readConfig()
 	require.Nil(t, err)
 
-	dfp := DynamicFlowProcessor{}
+	reg := prometheus.NewPedanticRegistry()
+	dfp := DynamicFlowProcessor{registry: reg}
 	assert.Nil(t, dfp.Metrics)
 	dfp.onConfigReload(context.TODO(), false, 0, *cfg)
 	assertMetricsConfigured(t, &dfp, cfg)
@@ -220,14 +204,13 @@ func assertMetricsConfigured(t *testing.T, dfp *DynamicFlowProcessor, cfg *api.C
 }
 
 func TestDfpProcessFlow(t *testing.T) {
-	// registry := prometheus.NewRegistry()
-
 	// Handlers: =drop, +flow
 	watcher := metricConfigWatcher{configFilePath: "testdata/valid_metric_config.yaml"}
 	cfg, _, _, err := watcher.readConfig()
 	require.Nil(t, err)
 
-	dfp := DynamicFlowProcessor{}
+	reg := prometheus.NewPedanticRegistry()
+	dfp := DynamicFlowProcessor{registry: reg}
 	dfp.onConfigReload(context.TODO(), false, 0, *cfg)
 
 	flow1 := &pb.Flow{
@@ -247,7 +230,7 @@ func TestDfpProcessFlow(t *testing.T) {
 	_, errs := dfp.OnDecodedFlow(context.TODO(), flow1)
 	assert.Nil(t, errs)
 
-	metricFamilies, err := Registry.Gather()
+	metricFamilies, err := reg.Gather()
 	require.NoError(t, err)
 
 	assert.Equal(t, "hubble_drop_total", *metricFamilies[0].Name)
@@ -270,55 +253,72 @@ func TestDfpProcessFlow(t *testing.T) {
 	assert.Equal(t, "src_pod", *metric.Label[4].Value)
 
 	assert.Equal(t, 1., *metric.Counter.Value)
-
 }
 
-// func TestFileWatcher(t *testing.T) {
-// 	watcher, err := fsnotify.NewWatcher()
-// 	if err != nil {
-// 		print(err)
-// 	}
-// 	watcher.Add("testdata/valid_metric_config_2.yaml")
-// 	cnt := 0
-// 	for {
-// 		select {
-// 		case e, ok := <-watcher.Events:
-// 			if !ok {
-// 				return
-// 			}
-// 			log.Println(e)
-// 			// print(e.Name, e.Op.String())
-// 			// do sth
-// 			// return
-// 			cnt++
-// 			if cnt == 4 {
-// 				return
-// 			}
-// 		case err, ok := <-watcher.Errors:
-// 			if !ok {
-// 				logrus.Print(err)
-// 				return
-// 			}
-// 		}
-// 	}
-// 	// go func(w *fsnotify.Watcher) {
-// 	// 	for {
-// 	// 		select {
-// 	// 		case _, ok := <-watcher.Events:
-// 	// 			if !ok {
-// 	// 				return
-// 	// 			}
-// 	// 			// do sth
-// 	// 		case err, ok := <-watcher.Errors:
-// 	// 			if !ok {
-// 	// 				logrus.Print(err)
-// 	// 				return
-// 	// 			}
-// 	// 		}
-// 	// 	}
-// 	// }(watcher)
-// }
+func ConfigureAndFetchDynamicMetrics(t *testing.T, testName string, exportedMetrics map[string][]string) {
+	t.Run(testName, func(t *testing.T) {
+		reg := prometheus.NewPedanticRegistry()
+		srv := SetUpTestMetricsServer(reg)
+		defer srv.Close()
 
-// test scenarios:
-// a. manual config reload in: check dfp.Metrics has changed
-// b.
+		// Handlers: =drop, +flow
+		watcher := metricConfigWatcher{configFilePath: "testdata/valid_metric_config_2.yaml"}
+		cfg, _, _, err := watcher.readConfig()
+		require.Nil(t, err)
+
+		dfp := DynamicFlowProcessor{registry: reg}
+		dfp.onConfigReload(context.TODO(), false, 0, *cfg)
+
+		flow1 := &pb.Flow{
+			EventType: &pb.CiliumEventType{Type: monitorAPI.MessageTypePolicyVerdict},
+			L4: &pb.Layer4{
+				Protocol: &pb.Layer4_TCP{
+					TCP: &pb.TCP{},
+				},
+			},
+			Source:         &pb.Endpoint{Namespace: "allow", PodName: "src_pod"},
+			Destination:    &pb.Endpoint{Namespace: "allow", PodName: "dst_pod"},
+			Verdict:        pb.Verdict_DROPPED,
+			DropReason:     uint32(pb.DropReason_POLICY_DENIED),
+			DropReasonDesc: pb.DropReason_POLICY_DENIED,
+		}
+
+		_, errs := dfp.OnDecodedFlow(context.TODO(), flow1)
+		assert.Nil(t, errs)
+
+		resp, err := http.Get("http://" + srv.Listener.Addr().String() + "/metrics")
+		require.Nil(t, err)
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+
+		assertMetricsFromServer(t, resp.Body, exportedMetrics)
+	})
+}
+
+func TestHubbleServerWithDynamicMetrics(t *testing.T) {
+	ConfigureAndFetchDynamicMetrics(
+		t,
+		"IsMetricServedDropWithOptions",
+		map[string][]string{
+			"hubble_drop_total":            {"destination_pod", "protocol", "reason", "source_namespace", "source_pod"},
+			"hubble_flows_processed_total": {"destination", "protocol", "subtype", "type", "verdict"}})
+}
+
+func assertMetricsFromServer(t *testing.T, in io.Reader, exportedMetrics map[string][]string) {
+	var parser expfmt.TextParser
+	mfMap, err := parser.TextToMetricFamilies(in)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	for metricName, metricFamily := range mfMap {
+		_, ok := exportedMetrics[metricName]
+		require.NotEmpty(t, ok)
+
+		labels := []string{}
+		for _, labelPair := range metricFamily.Metric[0].Label {
+			labels = append(labels, *(labelPair.Name))
+		}
+		sort.Strings(labels)
+		require.Equal(t, exportedMetrics[metricName], labels)
+	}
+}
