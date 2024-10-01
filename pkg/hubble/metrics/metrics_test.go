@@ -128,7 +128,7 @@ func TestReadMetricConfigFromCM(t *testing.T) {
 			ContextOptionConfigs: []*api.ContextOptionConfig{
 				{
 					Name:   "labelsContext",
-					Values: []string{"source_namespace", "source_pod"},
+					Values: []string{"source_namespace", "source_pod", "destination_pods"},
 				},
 			},
 			IncludeFilters: []*pb.FlowFilter{
@@ -164,6 +164,7 @@ func assertMetricConfig(t *testing.T, expected, actual api.MetricConfig) {
 
 	assert.Equal(t, len(expected.ContextOptionConfigs), len(actual.ContextOptionConfigs))
 	for i, c := range expected.ContextOptionConfigs {
+		assert.Equal(t, len(expected.ContextOptionConfigs[i].Values), len(actual.ContextOptionConfigs[i].Values))
 		assert.Equal(t, expected.ContextOptionConfigs[i].Name, actual.ContextOptionConfigs[i].Name)
 		for j, s := range c.Values {
 			assert.Equal(t, expected.ContextOptionConfigs[i].Values[j], s)
@@ -216,6 +217,60 @@ func assertMetricsConfigured(t *testing.T, dfp *DynamicFlowProcessor, cfg *api.C
 		_, ok := names[m.Name]
 		assert.True(t, ok)
 	}
+}
+
+func TestDfpProcessFlow(t *testing.T) {
+	// registry := prometheus.NewRegistry()
+
+	// Handlers: =drop, +flow
+	watcher := metricConfigWatcher{configFilePath: "testdata/valid_metric_config.yaml"}
+	cfg, _, _, err := watcher.readConfig()
+	require.Nil(t, err)
+
+	dfp := DynamicFlowProcessor{}
+	dfp.onConfigReload(context.TODO(), false, 0, *cfg)
+
+	flow1 := &pb.Flow{
+		EventType: &pb.CiliumEventType{Type: monitorAPI.MessageTypePolicyVerdict},
+		L4: &pb.Layer4{
+			Protocol: &pb.Layer4_TCP{
+				TCP: &pb.TCP{},
+			},
+		},
+		Source:         &pb.Endpoint{Namespace: "allow", PodName: "src_pod"},
+		Destination:    &pb.Endpoint{Namespace: "allow", PodName: "dst_pod"},
+		Verdict:        pb.Verdict_DROPPED,
+		DropReason:     uint32(pb.DropReason_POLICY_DENIED),
+		DropReasonDesc: pb.DropReason_POLICY_DENIED,
+	}
+
+	_, errs := dfp.OnDecodedFlow(context.TODO(), flow1)
+	assert.Nil(t, errs)
+
+	metricFamilies, err := Registry.Gather()
+	require.NoError(t, err)
+
+	assert.Equal(t, "hubble_drop_total", *metricFamilies[0].Name)
+	require.Len(t, metricFamilies[0].Metric, 1)
+	metric := metricFamilies[0].Metric[0]
+
+	assert.Equal(t, "destination_pod", *metric.Label[0].Name)
+	assert.Equal(t, "dst_pod", *metric.Label[0].Value)
+
+	assert.Equal(t, "protocol", *metric.Label[1].Name)
+	assert.Equal(t, "TCP", *metric.Label[1].Value)
+
+	assert.Equal(t, "reason", *metric.Label[2].Name)
+	assert.Equal(t, "POLICY_DENIED", *metric.Label[2].Value)
+
+	assert.Equal(t, "source_namespace", *metric.Label[3].Name)
+	assert.Equal(t, "allow", *metric.Label[3].Value)
+
+	assert.Equal(t, "source_pod", *metric.Label[4].Name)
+	assert.Equal(t, "src_pod", *metric.Label[4].Value)
+
+	assert.Equal(t, 1., *metric.Counter.Value)
+
 }
 
 // func TestFileWatcher(t *testing.T) {

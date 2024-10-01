@@ -2,8 +2,8 @@ metrics:
 - name: "drop"
   contextOptions:
   - name: "labelsContext"
-    values: ["source_namespace", "source_pod"]
+    values: ["source_namespace", "source_pod", "destination_pod"]
   includeFilters:
-  - source_pod: ["default/"]
-  - destination_pod: ["frontend/pod1"]
+  - source_pod: ["allow/src_pod"]
+  - destination_pod: ["allow/dest_pod"]
   excludeFilters: []

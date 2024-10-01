@@ -44,8 +44,11 @@ func (d *DynamicFlowProcessor) OnDecodedFlow(ctx context.Context, flow *flowpb.F
 
 	var errs error
 	// TODO move filtering from each handler here
-	if enabledMetrics != nil {
-		errs = enabledMetrics.ProcessFlow(ctx, flow)
+	// if enabledMetrics != nil {
+	// 	errs = enabledMetrics.ProcessFlow(ctx, flow)
+	// }
+	if d.Metrics != nil {
+		d.Metrics.ProcessFlow(ctx, flow)
 	}
 
 	if errs != nil {
