@@ -79,24 +79,35 @@ type FlowProcessor interface {
 	ProcessFlow(ctx context.Context, flow *pb.Flow) error
 }
 
+type NamedFp struct {
+	Name string
+	Fp   FlowProcessor
+}
+
 func NewHandlers(log logrus.FieldLogger, registry *prometheus.Registry, in []NamedHandler) (*Handlers, error) {
 	var handlers Handlers
 	for _, item := range in {
-		handlers.Handlers = append(handlers.Handlers, item)
-		if fp, ok := item.Handler.(FlowProcessor); ok {
-			handlers.flowProcessors = append(handlers.flowProcessors, fp)
-		}
-
-		if err := item.Handler.Init(registry, item.MetricConfig); err != nil {
-			return nil, fmt.Errorf("unable to initialize metric '%s': %w", item.Name, err)
-		}
-
-		log.WithFields(logrus.Fields{
-			"name":   item.Name,
-			"status": item.Handler.Status(),
-		}).Info("Configured metrics plugin")
+		NewHandler(log, registry, &item, &handlers)
 	}
 	return &handlers, nil
+}
+
+func NewHandler(log logrus.FieldLogger, registry *prometheus.Registry, item *NamedHandler, handlers *Handlers) error {
+	handlers.Handlers = append(handlers.Handlers, *item)
+	if fp, ok := item.Handler.(FlowProcessor); ok {
+		handlers.flowProcessors = append(handlers.flowProcessors, fp)
+	}
+
+	if err := item.Handler.Init(registry, item.MetricConfig); err != nil {
+		return fmt.Errorf("unable to initialize metric '%s': %w", item.Name, err)
+	}
+
+	// log.WithFields(logrus.Fields{
+	// 	"name":   item.Name,
+	// 	"status": item.Handler.Status(),
+	// }).Info("Configured metrics plugin")
+
+	return nil
 }
 
 // ProcessFlow processes a flow by calling ProcessFlow it on to all enabled

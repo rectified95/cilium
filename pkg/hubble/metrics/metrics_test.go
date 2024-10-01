@@ -182,6 +182,7 @@ func assertMetricConfig(t *testing.T, expected, actual api.MetricConfig) {
 }
 
 func TestMetricsUpdatedOnConfigChange(t *testing.T) {
+	// Handlers: +drop
 	watcher := metricConfigWatcher{configFilePath: "testdata/valid_metric_config.yaml"}
 	cfg, _, _, err := watcher.readConfig()
 	require.Nil(t, err)
@@ -191,7 +192,16 @@ func TestMetricsUpdatedOnConfigChange(t *testing.T) {
 	dfp.onConfigReload(context.TODO(), false, 0, *cfg)
 	assertMetricsConfigured(t, &dfp, cfg)
 
+	// Handlers: =drop, +flow
 	watcher = metricConfigWatcher{configFilePath: "testdata/valid_metric_config_2.yaml"}
+	cfg, _, _, err = watcher.readConfig()
+	require.Nil(t, err)
+
+	dfp.onConfigReload(context.TODO(), false, 0, *cfg)
+	assertMetricsConfigured(t, &dfp, cfg)
+
+	// Handlers: -drop, =flow
+	watcher = metricConfigWatcher{configFilePath: "testdata/valid_metric_config_3.yaml"}
 	cfg, _, _, err = watcher.readConfig()
 	require.Nil(t, err)
 
@@ -208,6 +218,52 @@ func assertMetricsConfigured(t *testing.T, dfp *DynamicFlowProcessor, cfg *api.C
 	}
 }
 
+// func TestFileWatcher(t *testing.T) {
+// 	watcher, err := fsnotify.NewWatcher()
+// 	if err != nil {
+// 		print(err)
+// 	}
+// 	watcher.Add("testdata/valid_metric_config_2.yaml")
+// 	cnt := 0
+// 	for {
+// 		select {
+// 		case e, ok := <-watcher.Events:
+// 			if !ok {
+// 				return
+// 			}
+// 			log.Println(e)
+// 			// print(e.Name, e.Op.String())
+// 			// do sth
+// 			// return
+// 			cnt++
+// 			if cnt == 4 {
+// 				return
+// 			}
+// 		case err, ok := <-watcher.Errors:
+// 			if !ok {
+// 				logrus.Print(err)
+// 				return
+// 			}
+// 		}
+// 	}
+// 	// go func(w *fsnotify.Watcher) {
+// 	// 	for {
+// 	// 		select {
+// 	// 		case _, ok := <-watcher.Events:
+// 	// 			if !ok {
+// 	// 				return
+// 	// 			}
+// 	// 			// do sth
+// 	// 		case err, ok := <-watcher.Errors:
+// 	// 			if !ok {
+// 	// 				logrus.Print(err)
+// 	// 				return
+// 	// 			}
+// 	// 		}
+// 	// 	}
+// 	// }(watcher)
+// }
+
 // test scenarios:
-// a. manual config reload in: check enabledMetrics has changed
+// a. manual config reload in: check dfp.Metrics has changed
 // b.
