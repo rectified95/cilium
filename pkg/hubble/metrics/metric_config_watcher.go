@@ -98,7 +98,10 @@ func (c *metricConfigWatcher) readConfig() (*api.Config, bool, uint64, error) {
 	}
 
 	newHash := calculateMetricHash(yamlFile)
-	return config, newHash != c.currentCfgHash, newHash, nil
+	isSameHash := newHash == c.currentCfgHash
+	c.currentCfgHash = newHash
+
+	return config, isSameHash, newHash, nil
 }
 
 func calculateMetricHash(file []byte) uint64 {
