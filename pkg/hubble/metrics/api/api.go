@@ -26,8 +26,7 @@ const (
 
 // Handlers contains all the metrics handlers.
 type Handlers struct {
-	Handlers []NamedHandler
-	// handlers       []Handler
+	Handlers       []NamedHandler
 	flowProcessors []FlowProcessor
 }
 

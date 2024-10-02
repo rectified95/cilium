@@ -4,6 +4,7 @@
 package metrics
 
 import (
+	"context"
 	"crypto/tls"
 	"net/http"
 
@@ -14,6 +15,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 
+	pb "github.com/cilium/cilium/api/v1/flow"
 	"github.com/cilium/cilium/pkg/crypto/certloader"
 	"github.com/cilium/cilium/pkg/hubble/metrics/api"
 	_ "github.com/cilium/cilium/pkg/hubble/metrics/dns"               // invoke init
@@ -68,12 +70,12 @@ var (
 )
 
 // ProcessFlow processes a flow and updates metrics
-// func ProcessFlow(ctx context.Context, flow *pb.Flow) error {
-// 	if enabledMetrics != nil {
-// 		return enabledMetrics.ProcessFlow(ctx, flow)
-// 	}
-// 	return nil
-// }
+func ProcessFlow(ctx context.Context, flow *pb.Flow) error {
+	if enabledMetrics != nil {
+		return enabledMetrics.ProcessFlow(ctx, flow)
+	}
+	return nil
+}
 
 func ProcessCiliumEndpointDeletion(pod *types.CiliumEndpoint) error {
 	if endpointDeletionHandler != nil && enabledMetrics != nil {
