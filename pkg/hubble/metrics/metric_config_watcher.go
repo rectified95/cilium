@@ -30,7 +30,7 @@ type metricConfigWatcher struct {
 }
 
 // NewmetricConfigWatcher creates a config watcher instance. Config watcher notifies
-// DynamicFlowProcessor when config file changes and dynamic metric config should be
+// DynamicHandler when config file changes and dynamic metric config should be
 // reconciled.
 func NewMetricConfigWatcher(
 	configFilePath string,

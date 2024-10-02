@@ -150,7 +150,7 @@ func (d *Daemon) launchHubble() {
 		)
 	}
 
-	// fill in the local node information after the dropEventEmitter logique,
+	// fill in the local node information after the dropEventEmitter logic,
 	// but before anything else (e.g. metrics).
 	localNodeWatcher, err := observer.NewLocalNodeWatcher(d.ctx, d.nodeLocalStore)
 	if err != nil {
@@ -221,7 +221,7 @@ func (d *Daemon) launchHubble() {
 			}).Info("Starting Hubble server with dynamically configurable metrics")
 
 			metrics.InitHubbleInternalMetrics(metrics.Registry, grpcMetrics)
-			dynamicFp := metrics.NewDynamicFlowProcessor(metrics.Registry, logger, option.Config.HubbleDynamicMetricConfigFilePath)
+			dynamicFp := metrics.NewDynamicHandler(metrics.Registry, logger, option.Config.HubbleDynamicMetricConfigFilePath)
 			observerOpts = append(observerOpts, observeroption.WithOnDecodedFlow(dynamicFp))
 		}
 

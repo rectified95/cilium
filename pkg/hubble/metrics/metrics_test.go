@@ -172,8 +172,8 @@ func TestMetricsUpdatedOnConfigChange(t *testing.T) {
 	require.Nil(t, err)
 
 	reg := prometheus.NewPedanticRegistry()
-	dfp := DynamicFlowProcessor{registry: reg}
-	assert.Nil(t, dfp.Metrics)
+	dfp := DynamicHandler{registry: reg}
+	assert.Nil(t, dfp.MetricHandlers)
 	dfp.onConfigReload(context.TODO(), false, 0, *cfg)
 	assertMetricsConfigured(t, &dfp, cfg)
 
@@ -194,10 +194,10 @@ func TestMetricsUpdatedOnConfigChange(t *testing.T) {
 	assertMetricsConfigured(t, &dfp, cfg)
 }
 
-func assertMetricsConfigured(t *testing.T, dfp *DynamicFlowProcessor, cfg *api.Config) {
+func assertMetricsConfigured(t *testing.T, dfp *DynamicHandler, cfg *api.Config) {
 	names := cfg.GetMetricNames()
-	assert.Equal(t, len(names), len(dfp.Metrics.Handlers))
-	for _, m := range dfp.Metrics.Handlers {
+	assert.Equal(t, len(names), len(dfp.MetricHandlers))
+	for _, m := range dfp.MetricHandlers {
 		_, ok := names[m.Name]
 		assert.True(t, ok)
 	}
@@ -210,7 +210,7 @@ func TestDfpProcessFlow(t *testing.T) {
 	require.Nil(t, err)
 
 	reg := prometheus.NewPedanticRegistry()
-	dfp := DynamicFlowProcessor{registry: reg}
+	dfp := DynamicHandler{registry: reg}
 	dfp.onConfigReload(context.TODO(), false, 0, *cfg)
 
 	flow1 := &pb.Flow{
@@ -266,7 +266,7 @@ func ConfigureAndFetchDynamicMetrics(t *testing.T, testName string, exportedMetr
 		cfg, _, _, err := watcher.readConfig()
 		require.Nil(t, err)
 
-		dfp := DynamicFlowProcessor{registry: reg}
+		dfp := DynamicHandler{registry: reg}
 		dfp.onConfigReload(context.TODO(), false, 0, *cfg)
 
 		flow1 := &pb.Flow{

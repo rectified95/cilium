@@ -5,32 +5,36 @@ package metrics
 
 import (
 	"context"
+	"errors"
 	"reflect"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	flowpb "github.com/cilium/cilium/api/v1/flow"
 
 	// "github.com/cilium/cilium/pkg/hubble/metrics"
+	v1 "github.com/cilium/cilium/pkg/hubble/api/v1"
+	"github.com/cilium/cilium/pkg/hubble/filters"
 	"github.com/cilium/cilium/pkg/hubble/metrics/api"
 	"github.com/cilium/cilium/pkg/lock"
 )
 
-// DynamicFlowProcessor represents instance of hubble exporter with dynamic
+// DynamicHandler represents instance of hubble exporter with dynamic
 // configuration reload.
-type DynamicFlowProcessor struct {
+type DynamicHandler struct {
 	logger  logrus.FieldLogger
 	watcher *metricConfigWatcher
-	// mutex protects from concurrent modification of managedFlowProcessors by config
+	// mutex protects from concurrent modification of handlers by config
 	// reloader when hubble events are processed
-	mutex    lock.RWMutex
-	Metrics  *api.Handlers // TODO add getnames for testing encapsulation?
-	registry *prometheus.Registry
+	mutex          lock.RWMutex
+	MetricHandlers []api.NamedHandler // TODO add getnames for testing encapsulation?
+	registry       *prometheus.Registry
 }
 
 // OnDecodedEvent distributes events across all managed exporters.
-func (d *DynamicFlowProcessor) OnDecodedFlow(ctx context.Context, flow *flowpb.Flow) (bool, error) {
+func (d *DynamicHandler) OnDecodedFlow(ctx context.Context, flow *flowpb.Flow) (bool, error) {
 	select {
 	case <-ctx.Done():
 		return false, nil
@@ -41,8 +45,11 @@ func (d *DynamicFlowProcessor) OnDecodedFlow(ctx context.Context, flow *flowpb.F
 	defer d.mutex.RUnlock()
 
 	var errs error
-	if d.Metrics != nil {
-		d.Metrics.ProcessFlow(ctx, flow)
+	for _, h := range d.MetricHandlers {
+		if !filters.Apply(h.AllowList, h.DenyList, &v1.Event{Event: flow, Timestamp: &timestamppb.Timestamp{}}) {
+			continue
+		}
+		errs = errors.Join(errs, h.Handler.ProcessFlow(ctx, flow))
 	}
 
 	if errs != nil {
@@ -51,18 +58,18 @@ func (d *DynamicFlowProcessor) OnDecodedFlow(ctx context.Context, flow *flowpb.F
 	return false, errs
 }
 
-// NewDynamicFlowProcessor creates instance of dynamic hubble flow exporter.
-func NewDynamicFlowProcessor(reg *prometheus.Registry, logger logrus.FieldLogger, configFilePath string) *DynamicFlowProcessor {
-	dynamicFlowProcessor := &DynamicFlowProcessor{
+// NewDynamicHandler creates instance of dynamic hubble flow exporter.
+func NewDynamicHandler(reg *prometheus.Registry, logger logrus.FieldLogger, configFilePath string) *DynamicHandler {
+	DynamicHandler := &DynamicHandler{
 		logger:   logger,
 		registry: reg,
 	}
-	watcher := NewMetricConfigWatcher(configFilePath, dynamicFlowProcessor.onConfigReload)
-	dynamicFlowProcessor.watcher = watcher
-	return dynamicFlowProcessor
+	watcher := NewMetricConfigWatcher(configFilePath, DynamicHandler.onConfigReload)
+	DynamicHandler.watcher = watcher
+	return DynamicHandler
 }
 
-func (d *DynamicFlowProcessor) onConfigReload(ctx context.Context, isSameHash bool, hash uint64, config api.Config) {
+func (d *DynamicHandler) onConfigReload(ctx context.Context, isSameHash bool, hash uint64, config api.Config) {
 	if isSameHash {
 		return
 	}
@@ -74,8 +81,8 @@ func (d *DynamicFlowProcessor) onConfigReload(ctx context.Context, isSameHash bo
 	metricNames := config.GetMetricNames()
 
 	curHandlerMap := make(map[string]api.NamedHandler)
-	if d.Metrics != nil {
-		for _, m := range d.Metrics.Handlers {
+	if d.MetricHandlers != nil {
+		for _, m := range d.MetricHandlers {
 			curHandlerMap[m.Name] = m
 		}
 
@@ -85,7 +92,7 @@ func (d *DynamicFlowProcessor) onConfigReload(ctx context.Context, isSameHash bo
 		}
 		// Unregister handlers not present in the new config.
 		// This needs to happen first to properly check for conflicting plugins later during registration.
-		for _, m := range d.Metrics.Handlers {
+		for _, m := range d.MetricHandlers {
 			if _, ok := configuredMetricNames[m.Name]; !ok {
 				h, _ := curHandlerMap[m.Name]
 				h.Handler.Deinit(d.registry)
@@ -116,17 +123,17 @@ func (d *DynamicFlowProcessor) onConfigReload(ctx context.Context, isSameHash bo
 			d.applyNewConfig(d.registry, cm, metricNames, &newHandlers)
 		}
 	}
-	d.Metrics = &newHandlers
+	d.MetricHandlers = newHandlers.Handlers
 }
 
-func (d *DynamicFlowProcessor) applyNewConfig(reg *prometheus.Registry, cm *api.MetricConfig, metricNames map[string]struct{}, newMetrics *api.Handlers) {
+func (d *DynamicHandler) applyNewConfig(reg *prometheus.Registry, cm *api.MetricConfig, metricNames map[string]struct{}, newMetrics *api.Handlers) {
 	// TODO locks?
 	nh, err := api.DefaultRegistry().ValidateAndCreateHandler(reg, cm, &metricNames)
 	if err != nil {
 		panic(err)
 	}
 
-	err = api.InitHandlersAndFlowProcessor(d.logger, reg, nh, newMetrics)
+	err = api.InitHandler(d.logger, reg, nh, newMetrics)
 	if err != nil {
 		panic(err)
 	}

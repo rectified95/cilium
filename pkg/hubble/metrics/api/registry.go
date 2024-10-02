@@ -4,11 +4,13 @@
 package api
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
 
+	"github.com/cilium/cilium/pkg/hubble/filters"
 	"github.com/cilium/cilium/pkg/lock"
 )
 
@@ -42,6 +44,8 @@ type NamedHandler struct {
 	Name         string
 	Handler      Handler
 	MetricConfig *MetricConfig
+	AllowList    filters.FilterFuncs
+	DenyList     filters.FilterFuncs
 }
 
 // ConfigureHandlers enables a set of metric handlers and initializes them.
@@ -61,30 +65,34 @@ func (r *Registry) ConfigureHandlers(registry *prometheus.Registry, enabled *Con
 		enabledHandlers = append(enabledHandlers, *h)
 	}
 
-	return InitHandlersAndFlowProcessors(r.log, registry, enabledHandlers)
+	return InitHandlers(r.log, registry, enabledHandlers)
 }
 
-func (r *Registry) ValidateAndCreateHandler(registry *prometheus.Registry, metricsConfig *MetricConfig, metricNames *map[string]struct{}) (*NamedHandler, error) {
+func (r *Registry) ValidateAndCreateHandler(registry *prometheus.Registry, cfg *MetricConfig, metricNames *map[string]struct{}) (*NamedHandler, error) {
 	// r.mutex.Lock()
 	// defer r.mutex.Unlock()
 
-	plugin, ok := r.handlers[metricsConfig.Name]
+	plugin, ok := r.handlers[cfg.Name]
 	if !ok {
-		return nil, fmt.Errorf("metric '%s' does not exist", metricsConfig.Name)
+		return nil, fmt.Errorf("metric '%s' does not exist", cfg.Name)
 	}
 
 	if cp, ok := plugin.(PluginConflicts); ok {
 		for _, conflict := range cp.ConflictingPlugins() {
 			if _, conflictExists := (*metricNames)[conflict]; conflictExists {
-				return nil, fmt.Errorf("plugin %s conflicts with plugin %s", metricsConfig.Name, conflict)
+				return nil, fmt.Errorf("plugin %s conflicts with plugin %s", cfg.Name, conflict)
 			}
 		}
 	}
+	allowList, _ := filters.BuildFilterList(context.Background(), cfg.IncludeFilters, filters.DefaultFilters(logrus.New()))
+	denyList, _ := filters.BuildFilterList(context.Background(), cfg.ExcludeFilters, filters.DefaultFilters(logrus.New()))
 
 	h := NamedHandler{
-		Name:         metricsConfig.Name,
+		Name:         cfg.Name,
 		Handler:      plugin.NewHandler(),
-		MetricConfig: metricsConfig,
+		MetricConfig: cfg,
+		AllowList:    allowList,
+		DenyList:     denyList,
 	}
 
 	return &h, nil
