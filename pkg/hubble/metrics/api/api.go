@@ -78,20 +78,15 @@ type FlowProcessor interface {
 	ProcessFlow(ctx context.Context, flow *pb.Flow) error
 }
 
-type NamedFp struct {
-	Name string
-	Fp   FlowProcessor
-}
-
-func NewHandlers(log logrus.FieldLogger, registry *prometheus.Registry, in []NamedHandler) (*Handlers, error) {
+func InitHandlersAndFlowProcessors(log logrus.FieldLogger, registry *prometheus.Registry, in []NamedHandler) (*Handlers, error) {
 	var handlers Handlers
 	for _, item := range in {
-		NewHandler(log, registry, &item, &handlers)
+		InitHandlersAndFlowProcessor(log, registry, &item, &handlers)
 	}
 	return &handlers, nil
 }
 
-func NewHandler(log logrus.FieldLogger, registry *prometheus.Registry, item *NamedHandler, handlers *Handlers) error {
+func InitHandlersAndFlowProcessor(log logrus.FieldLogger, registry *prometheus.Registry, item *NamedHandler, handlers *Handlers) error {
 	handlers.Handlers = append(handlers.Handlers, *item)
 	if fp, ok := item.Handler.(FlowProcessor); ok {
 		handlers.flowProcessors = append(handlers.flowProcessors, fp)

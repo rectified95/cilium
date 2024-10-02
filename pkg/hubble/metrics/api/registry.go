@@ -54,17 +54,17 @@ func (r *Registry) ConfigureHandlers(registry *prometheus.Registry, enabled *Con
 	var enabledHandlers []NamedHandler
 	metricNames := enabled.GetMetricNames()
 	for _, metricsConfig := range enabled.Metrics {
-		h, err := r.ConfigureHandler(registry, metricsConfig, &metricNames)
+		h, err := r.ValidateAndCreateHandler(registry, metricsConfig, &metricNames)
 		if err != nil {
 			return nil, err
 		}
 		enabledHandlers = append(enabledHandlers, *h)
 	}
 
-	return NewHandlers(r.log, registry, enabledHandlers)
+	return InitHandlersAndFlowProcessors(r.log, registry, enabledHandlers)
 }
 
-func (r *Registry) ConfigureHandler(registry *prometheus.Registry, metricsConfig *MetricConfig, metricNames *map[string]struct{}) (*NamedHandler, error) {
+func (r *Registry) ValidateAndCreateHandler(registry *prometheus.Registry, metricsConfig *MetricConfig, metricNames *map[string]struct{}) (*NamedHandler, error) {
 	// r.mutex.Lock()
 	// defer r.mutex.Unlock()
 

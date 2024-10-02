@@ -22,13 +22,9 @@ import (
 type DynamicFlowProcessor struct {
 	logger  logrus.FieldLogger
 	watcher *metricConfigWatcher
-	// namedFps      map[string]*api.NamedFp
-	// namedHandlers map[string]*api.NamedHandler // TODO move config from handler to here and use this type instead
-
 	// mutex protects from concurrent modification of managedFlowProcessors by config
 	// reloader when hubble events are processed
-	mutex lock.RWMutex
-	// TODO remove Metrics and use named maps above; refactor helper funcs
+	mutex    lock.RWMutex
 	Metrics  *api.Handlers // TODO add getnames for testing encapsulation?
 	registry *prometheus.Registry
 }
@@ -45,7 +41,6 @@ func (d *DynamicFlowProcessor) OnDecodedFlow(ctx context.Context, flow *flowpb.F
 	defer d.mutex.RUnlock()
 
 	var errs error
-	// TODO move filtering from each handler here
 	if d.Metrics != nil {
 		d.Metrics.ProcessFlow(ctx, flow)
 	}
@@ -59,9 +54,7 @@ func (d *DynamicFlowProcessor) OnDecodedFlow(ctx context.Context, flow *flowpb.F
 // NewDynamicFlowProcessor creates instance of dynamic hubble flow exporter.
 func NewDynamicFlowProcessor(reg *prometheus.Registry, logger logrus.FieldLogger, configFilePath string) *DynamicFlowProcessor {
 	dynamicFlowProcessor := &DynamicFlowProcessor{
-		logger: logger,
-		// namedHandlers: make(map[string]*api.NamedHandler),
-		// namedFps:      make(map[string]*api.NamedFp),
+		logger:   logger,
 		registry: reg,
 	}
 	watcher := NewMetricConfigWatcher(configFilePath, dynamicFlowProcessor.onConfigReload)
@@ -128,13 +121,14 @@ func (d *DynamicFlowProcessor) onConfigReload(ctx context.Context, isSameHash bo
 
 func (d *DynamicFlowProcessor) applyNewConfig(reg *prometheus.Registry, cm *api.MetricConfig, metricNames map[string]struct{}, newMetrics *api.Handlers) {
 	// TODO locks?
-	nh, err := api.DefaultRegistry().ConfigureHandler(reg, cm, &metricNames)
+	nh, err := api.DefaultRegistry().ValidateAndCreateHandler(reg, cm, &metricNames)
 	if err != nil {
 		panic(err)
 	}
 
-	err = api.NewHandler(d.logger, reg, nh, newMetrics)
+	err = api.InitHandlersAndFlowProcessor(d.logger, reg, nh, newMetrics)
 	if err != nil {
 		panic(err)
 	}
+	// TODO don't panic, add transaction recovery logic
 }
