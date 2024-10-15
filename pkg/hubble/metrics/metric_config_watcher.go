@@ -7,13 +7,16 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"os"
+	"reflect"
 
 	"github.com/sirupsen/logrus"
 	"sigs.k8s.io/yaml"
 
 	"github.com/cilium/cilium/pkg/hubble/metrics/api"
+	"github.com/cilium/cilium/pkg/lock"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/time"
 )
@@ -27,6 +30,8 @@ type metricConfigWatcher struct {
 	ticker         *time.Ticker
 	stop           chan bool
 	currentCfgHash uint64
+	cfgStore       map[string]*api.MetricConfig
+	mutex          lock.RWMutex
 }
 
 // NewmetricConfigWatcher creates a config watcher instance. Config watcher notifies
@@ -41,13 +46,12 @@ func NewMetricConfigWatcher(
 		configFilePath: configFilePath,
 		callback:       callback,
 		currentCfgHash: 0,
+		cfgStore:       make(map[string]*api.MetricConfig),
 	}
 
 	// initial configuration load
 	watcher.reload()
 
-	// TODO replace ticker reloads with inotify watchers
-	// https://pkg.go.dev/k8s.io/utils/inotify
 	watcher.ticker = time.NewTicker(metricReloadInterval)
 	watcher.stop = make(chan bool)
 
@@ -69,10 +73,17 @@ func (c *metricConfigWatcher) reload() {
 	c.logger.Debug("Attempting reload")
 	config, isSameHash, hash, err := c.readConfig()
 	if err != nil {
-		c.logger.Warnf("failed reading dynamic exporter config")
+		c.logger.WithError(err).Error("failed reading dynamic exporter config")
 	} else {
 		c.callback(context.TODO(), isSameHash, hash, *config)
 	}
+}
+
+func (c *metricConfigWatcher) resetCfgPath(path string) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	c.configFilePath = path
 }
 
 // Stop stops watcher.
@@ -84,7 +95,10 @@ func (c *metricConfigWatcher) Stop() {
 }
 
 func (c *metricConfigWatcher) readConfig() (*api.Config, bool, uint64, error) {
-	config := &api.Config{}
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	config := &api.Config{Metrics: []*api.MetricConfig{}}
 	yamlFile, err := os.ReadFile(c.configFilePath)
 	if err != nil {
 		return nil, false, 0, fmt.Errorf("cannot read file '%s': %w", c.configFilePath, err)
@@ -93,7 +107,7 @@ func (c *metricConfigWatcher) readConfig() (*api.Config, bool, uint64, error) {
 		return nil, false, 0, fmt.Errorf("cannot parse yaml: %w", err)
 	}
 
-	if err := validateMetricConfig(config); err != nil {
+	if err := c.validateMetricConfig(config); err != nil {
 		return nil, false, 0, fmt.Errorf("invalid yaml config file: %w", err)
 	}
 
@@ -109,6 +123,30 @@ func calculateMetricHash(file []byte) uint64 {
 	return binary.LittleEndian.Uint64(sum[0:16])
 }
 
-func validateMetricConfig(config *api.Config) error {
-	return nil
+func (c *metricConfigWatcher) validateMetricConfig(config *api.Config) error {
+	metrics := make(map[string]interface{})
+	var errs error
+
+	for i, newMetric := range config.Metrics {
+		if newMetric.Name == "" {
+			errs = errors.Join(errs, fmt.Errorf("metric config validation failed - missing metric name at: %d", i))
+			continue
+		}
+		if _, ok := metrics[newMetric.Name]; ok {
+			errs = errors.Join(errs, fmt.Errorf("metric config validation failed - duplicate metric specified: %v", newMetric.Name))
+		}
+		metrics[newMetric.Name] = struct{}{}
+		if oldMetric, ok := c.cfgStore[newMetric.Name]; ok {
+			if !reflect.DeepEqual(newMetric.ContextOptionConfigs, oldMetric.ContextOptionConfigs) {
+				errs = errors.Join(errs, fmt.Errorf("metric config validation failed - label set cannot be changed without restarting Prometheus. metric: %v", newMetric.Name))
+			}
+		}
+	}
+
+	if errs == nil {
+		for _, newMetric := range config.Metrics {
+			c.cfgStore[newMetric.Name] = newMetric
+		}
+	}
+	return errs
 }
