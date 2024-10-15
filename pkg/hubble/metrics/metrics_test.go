@@ -20,6 +20,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"k8s.io/client-go/util/workqueue"
 
+	dto "github.com/prometheus/client_model/go"
+
 	pb "github.com/cilium/cilium/api/v1/flow"
 	"github.com/cilium/cilium/pkg/hubble/metrics/api"
 	slim_metav1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/apis/meta/v1"
@@ -101,7 +103,7 @@ func TestHubbleServerStandalone(t *testing.T) {
 }
 
 func TestReadMetricConfigFromCM(t *testing.T) {
-	watcher := metricConfigWatcher{configFilePath: "testdata/valid_metric_config_2.yaml"}
+	watcher := metricConfigWatcher{configFilePath: "testdata/valid_metric_config_drop_flow.yaml", cfgStore: make(map[string]*api.MetricConfig)}
 	cfg, _, _, err := watcher.readConfig()
 	require.Nil(t, err)
 
@@ -140,6 +142,16 @@ func TestReadMetricConfigFromCM(t *testing.T) {
 	for i := range expectedConfigs {
 		assertMetricConfig(t, expectedConfigs[i], *cfg.Metrics[i])
 	}
+
+	// Attempt to re-register drop handler with fewer labels should fail.
+	watcher.resetCfgPath("testdata/valid_metric_config_drop_fewer_labels.yaml")
+	_, _, _, err = watcher.readConfig()
+	require.EqualErrorf(t, err, "invalid yaml config file: metric config validation failed - label set cannot be changed without restarting Prometheus. metric: drop", "")
+
+	// Attempt to register metric handlers with missing names should fail.
+	watcher.resetCfgPath("testdata/invalid_config_missing_name.yaml")
+	_, _, _, err = watcher.readConfig()
+	require.EqualErrorf(t, err, "invalid yaml config file: metric config validation failed - missing metric name at: 0\nmetric config validation failed - missing metric name at: 1", "")
 }
 
 func assertMetricConfig(t *testing.T, expected, actual api.MetricConfig) {
@@ -165,9 +177,9 @@ func assertMetricConfig(t *testing.T, expected, actual api.MetricConfig) {
 	}
 }
 
-func TestMetricsUpdatedOnConfigChange(t *testing.T) {
+func TestHandlersUpdatedInDfpOnConfigChange(t *testing.T) {
 	// Handlers: +drop
-	watcher := metricConfigWatcher{configFilePath: "testdata/valid_metric_config.yaml"}
+	watcher := metricConfigWatcher{configFilePath: "testdata/valid_metric_config_drop.yaml", cfgStore: make(map[string]*api.MetricConfig)}
 	cfg, _, _, err := watcher.readConfig()
 	require.Nil(t, err)
 
@@ -175,26 +187,26 @@ func TestMetricsUpdatedOnConfigChange(t *testing.T) {
 	dfp := DynamicFlowProcessor{registry: reg}
 	assert.Nil(t, dfp.Metrics)
 	dfp.onConfigReload(context.TODO(), false, 0, *cfg)
-	assertMetricsConfigured(t, &dfp, cfg)
+	assertHandlersInDfp(t, &dfp, cfg)
 
 	// Handlers: =drop, +flow
-	watcher = metricConfigWatcher{configFilePath: "testdata/valid_metric_config_2.yaml"}
+	watcher.resetCfgPath("testdata/valid_metric_config_drop_flow.yaml")
 	cfg, _, _, err = watcher.readConfig()
 	require.Nil(t, err)
 
 	dfp.onConfigReload(context.TODO(), false, 0, *cfg)
-	assertMetricsConfigured(t, &dfp, cfg)
+	assertHandlersInDfp(t, &dfp, cfg)
 
 	// Handlers: -drop, =flow
-	watcher = metricConfigWatcher{configFilePath: "testdata/valid_metric_config_3.yaml"}
+	watcher.resetCfgPath("testdata/valid_metric_config_flow.yaml")
 	cfg, _, _, err = watcher.readConfig()
 	require.Nil(t, err)
 
 	dfp.onConfigReload(context.TODO(), false, 0, *cfg)
-	assertMetricsConfigured(t, &dfp, cfg)
+	assertHandlersInDfp(t, &dfp, cfg)
 }
 
-func assertMetricsConfigured(t *testing.T, dfp *DynamicFlowProcessor, cfg *api.Config) {
+func assertHandlersInDfp(t *testing.T, dfp *DynamicFlowProcessor, cfg *api.Config) {
 	names := cfg.GetMetricNames()
 	assert.Equal(t, len(names), len(dfp.Metrics.Handlers))
 	for _, m := range dfp.Metrics.Handlers {
@@ -203,9 +215,9 @@ func assertMetricsConfigured(t *testing.T, dfp *DynamicFlowProcessor, cfg *api.C
 	}
 }
 
-func TestDfpProcessFlow(t *testing.T) {
-	// Handlers: =drop, +flow
-	watcher := metricConfigWatcher{configFilePath: "testdata/valid_metric_config.yaml"}
+func TestMetricReRegisterAndCollect(t *testing.T) {
+	// Handlers: +drop
+	watcher := metricConfigWatcher{configFilePath: "testdata/valid_metric_config_drop.yaml", cfgStore: make(map[string]*api.MetricConfig)}
 	cfg, _, _, err := watcher.readConfig()
 	require.Nil(t, err)
 
@@ -232,7 +244,40 @@ func TestDfpProcessFlow(t *testing.T) {
 
 	metricFamilies, err := reg.Gather()
 	require.NoError(t, err)
+	assert.NotNil(t, metricFamilies)
+	assertGatheredDrops(t, metricFamilies)
 
+	// Read in empty config.
+	watcher.resetCfgPath("testdata/valid_empty_metric_cfg.yaml")
+	cfg, _, _, err = watcher.readConfig()
+	require.Nil(t, err)
+
+	dfp.onConfigReload(context.TODO(), false, 0, *cfg)
+	assert.Nil(t, errs)
+
+	// The existing drop metrics should be removed after the handler is deregistered.
+	metricFamilies, err = reg.Gather()
+	require.NoError(t, err)
+	assert.Nil(t, metricFamilies)
+
+	// Re-register drop handler with same config and collect metrics.
+	watcher.resetCfgPath("testdata/valid_metric_config_drop.yaml")
+	cfg, _, _, err = watcher.readConfig()
+	require.Nil(t, err)
+
+	dfp.onConfigReload(context.TODO(), false, 0, *cfg)
+	assert.Nil(t, errs)
+
+	_, errs = dfp.OnDecodedFlow(context.TODO(), flow1)
+	assert.Nil(t, errs)
+
+	metricFamilies, err = reg.Gather()
+	require.NoError(t, err)
+	assert.NotNil(t, metricFamilies)
+	assertGatheredDrops(t, metricFamilies)
+}
+
+func assertGatheredDrops(t *testing.T, metricFamilies []*dto.MetricFamily) {
 	assert.Equal(t, "hubble_drop_total", *metricFamilies[0].Name)
 	require.Len(t, metricFamilies[0].Metric, 1)
 	metric := metricFamilies[0].Metric[0]
@@ -261,8 +306,8 @@ func ConfigureAndFetchDynamicMetrics(t *testing.T, testName string, exportedMetr
 		srv := SetUpTestMetricsServer(reg)
 		defer srv.Close()
 
-		// Handlers: =drop, +flow
-		watcher := metricConfigWatcher{configFilePath: "testdata/valid_metric_config_2.yaml"}
+		// Handlers: +drop, +flow
+		watcher := metricConfigWatcher{configFilePath: "testdata/valid_metric_config_drop_flow.yaml", cfgStore: make(map[string]*api.MetricConfig)}
 		cfg, _, _, err := watcher.readConfig()
 		require.Nil(t, err)
 
@@ -312,7 +357,7 @@ func assertMetricsFromServer(t *testing.T, in io.Reader, exportedMetrics map[str
 
 	for metricName, metricFamily := range mfMap {
 		_, ok := exportedMetrics[metricName]
-		require.NotEmpty(t, ok)
+		assert.True(t, ok)
 
 		labels := []string{}
 		for _, labelPair := range metricFamily.Metric[0].Label {
