@@ -103,7 +103,7 @@ func TestHubbleServerStandalone(t *testing.T) {
 }
 
 func TestReadMetricConfigFromCM(t *testing.T) {
-	watcher := metricConfigWatcher{configFilePath: "testdata/valid_metric_config_2.yaml"}
+	watcher := metricConfigWatcher{configFilePath: "testdata/valid_metric_config_drop_flow.yaml", cfgStore: make(map[string]*api.MetricConfig)}
 	cfg, _, _, err := watcher.readConfig()
 	require.Nil(t, err)
 
@@ -142,6 +142,16 @@ func TestReadMetricConfigFromCM(t *testing.T) {
 	for i := range expectedConfigs {
 		assertMetricConfig(t, expectedConfigs[i], *cfg.Metrics[i])
 	}
+
+	// Attempt to re-register drop handler with fewer labels should fail.
+	watcher.resetCfgPath("testdata/valid_metric_config_drop_fewer_labels.yaml")
+	_, _, _, err = watcher.readConfig()
+	require.EqualErrorf(t, err, "invalid yaml config file: metric config validation failed - label set cannot be changed without restarting Prometheus. metric: drop", "")
+
+	// Attempt to register metric handlers with missing names should fail.
+	watcher.resetCfgPath("testdata/invalid_config_missing_name.yaml")
+	_, _, _, err = watcher.readConfig()
+	require.EqualErrorf(t, err, "invalid yaml config file: metric config validation failed - missing metric name at: 0\nmetric config validation failed - missing metric name at: 1", "")
 }
 
 func assertMetricConfig(t *testing.T, expected, actual api.MetricConfig) {
@@ -169,7 +179,7 @@ func assertMetricConfig(t *testing.T, expected, actual api.MetricConfig) {
 
 func TestHandlersUpdatedInDfpOnConfigChange(t *testing.T) {
 	// Handlers: +drop
-	watcher := metricConfigWatcher{configFilePath: "testdata/valid_metric_config.yaml"}
+	watcher := metricConfigWatcher{configFilePath: "testdata/valid_metric_config_drop.yaml", cfgStore: make(map[string]*api.MetricConfig)}
 	cfg, _, _, err := watcher.readConfig()
 	require.Nil(t, err)
 
@@ -180,7 +190,7 @@ func TestHandlersUpdatedInDfpOnConfigChange(t *testing.T) {
 	assertHandlersInDfp(t, &dfp, cfg)
 
 	// Handlers: =drop, +flow
-	watcher = metricConfigWatcher{configFilePath: "testdata/valid_metric_config_2.yaml"}
+	watcher.resetCfgPath("testdata/valid_metric_config_drop_flow.yaml")
 	cfg, _, _, err = watcher.readConfig()
 	require.Nil(t, err)
 
@@ -188,7 +198,7 @@ func TestHandlersUpdatedInDfpOnConfigChange(t *testing.T) {
 	assertHandlersInDfp(t, &dfp, cfg)
 
 	// Handlers: -drop, =flow
-	watcher = metricConfigWatcher{configFilePath: "testdata/valid_metric_config_3.yaml"}
+	watcher.resetCfgPath("testdata/valid_metric_config_flow.yaml")
 	cfg, _, _, err = watcher.readConfig()
 	require.Nil(t, err)
 
@@ -207,7 +217,7 @@ func assertHandlersInDfp(t *testing.T, dfp *DynamicFlowProcessor, cfg *api.Confi
 
 func TestMetricReRegisterAndCollect(t *testing.T) {
 	// Handlers: +drop
-	watcher := metricConfigWatcher{configFilePath: "testdata/valid_metric_config.yaml"}
+	watcher := metricConfigWatcher{configFilePath: "testdata/valid_metric_config_drop.yaml", cfgStore: make(map[string]*api.MetricConfig)}
 	cfg, _, _, err := watcher.readConfig()
 	require.Nil(t, err)
 
@@ -238,7 +248,7 @@ func TestMetricReRegisterAndCollect(t *testing.T) {
 	assertGatheredDrops(t, metricFamilies)
 
 	// Read in empty config.
-	watcher = metricConfigWatcher{configFilePath: "testdata/valid_empty_metric_cfg.yaml"}
+	watcher.resetCfgPath("testdata/valid_empty_metric_cfg.yaml")
 	cfg, _, _, err = watcher.readConfig()
 	require.Nil(t, err)
 
@@ -251,7 +261,7 @@ func TestMetricReRegisterAndCollect(t *testing.T) {
 	assert.Nil(t, metricFamilies)
 
 	// Re-register drop handler with same config and collect metrics.
-	watcher = metricConfigWatcher{configFilePath: "testdata/valid_metric_config.yaml"}
+	watcher.resetCfgPath("testdata/valid_metric_config_drop.yaml")
 	cfg, _, _, err = watcher.readConfig()
 	require.Nil(t, err)
 
@@ -297,7 +307,7 @@ func ConfigureAndFetchDynamicMetrics(t *testing.T, testName string, exportedMetr
 		defer srv.Close()
 
 		// Handlers: +drop, +flow
-		watcher := metricConfigWatcher{configFilePath: "testdata/valid_metric_config_2.yaml"}
+		watcher := metricConfigWatcher{configFilePath: "testdata/valid_metric_config_drop_flow.yaml", cfgStore: make(map[string]*api.MetricConfig)}
 		cfg, _, _, err := watcher.readConfig()
 		require.Nil(t, err)
 
