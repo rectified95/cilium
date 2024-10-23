@@ -362,9 +362,11 @@ func (h *hubbleIntegration) launch(ctx context.Context) {
 
 			observerOpts = append(observerOpts,
 				observeroption.WithOnDecodedFlowFunc(func(ctx context.Context, flow *flowpb.Flow) (bool, error) {
-					err := metrics.ProcessFlow(ctx, flow)
-					if err != nil {
-						h.log.WithError(err).Error("Failed to ProcessFlow in metrics handler")
+					if metrics.EnabledMetrics != nil {
+						err := api.ExecuteAllProcessFlow(ctx, flow, &metrics.EnabledMetrics)
+						if err != nil {
+							h.log.WithError(err).Error("Failed to ProcessFlow in metrics handler")
+						}
 					}
 					return false, nil
 				}),
