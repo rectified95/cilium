@@ -128,7 +128,7 @@ func (d *DynamicFlowProcessor) addNewMetric(reg *prometheus.Registry, cm *api.Me
 		return
 	}
 
-	err = api.InitHandlersAndFlowProcessor(d.logger, reg, nh, newMetrics)
+	err = api.InitHandler(d.logger, reg, nh, newMetrics)
 	if err != nil {
 		d.logger.WithFields(logrus.Fields{
 			"metric name": cm.Name,
