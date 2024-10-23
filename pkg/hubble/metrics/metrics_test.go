@@ -36,7 +36,7 @@ func TestInitializedMetrics(t *testing.T) {
 				Name: "name",
 			},
 		}
-		enabledMetrics = &api.Handlers{}
+		EnabledMetrics = []api.NamedHandler{}
 		endpointDeletionHandler = &CiliumEndpointDeletionHandler{
 			gracefulPeriod: 10 * time.Millisecond,
 			queue:          workqueue.NewDelayingQueue(),
@@ -82,7 +82,7 @@ func ConfigureAndFetchMetrics(t *testing.T, testName string, metricCfg []string,
 			Verdict:     pb.Verdict_DROPPED,
 			DropReason:  uint32(pb.DropReason_POLICY_DENIED),
 		}
-		enabledMetrics.ProcessFlow(context.TODO(), flow)
+		api.ExecuteAllProcessFlow(context.TODO(), flow, &EnabledMetrics)
 
 		resp, err := http.Get("http://" + srv.Listener.Addr().String() + "/metrics")
 		require.NoError(t, err)
@@ -208,8 +208,8 @@ func TestHandlersUpdatedInDfpOnConfigChange(t *testing.T) {
 
 func assertHandlersInDfp(t *testing.T, dfp *DynamicFlowProcessor, cfg *api.Config) {
 	names := cfg.GetMetricNames()
-	assert.Equal(t, len(names), len(dfp.Metrics.Handlers))
-	for _, m := range dfp.Metrics.Handlers {
+	assert.Equal(t, len(names), len(dfp.Metrics))
+	for _, m := range dfp.Metrics {
 		_, ok := names[m.Name]
 		assert.True(t, ok)
 	}

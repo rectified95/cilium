@@ -24,11 +24,6 @@ const (
 	DefaultPrometheusNamespace = "hubble"
 )
 
-// Handlers contains all the metrics handlers.
-type Handlers struct {
-	Handlers []NamedHandler
-}
-
 // Plugin is a metric plugin. A metric plugin is associated a name and is
 // responsible to spawn metric handlers of a certain type.
 type Plugin interface {
@@ -73,16 +68,16 @@ type Handler interface {
 	ProcessFlow(ctx context.Context, flow *pb.Flow) error
 }
 
-func InitHandlers(log logrus.FieldLogger, registry *prometheus.Registry, in []NamedHandler) (*Handlers, error) {
-	var handlers Handlers
-	for _, item := range in {
+func InitHandlers(log logrus.FieldLogger, registry *prometheus.Registry, in *[]NamedHandler) (*[]NamedHandler, error) {
+	var handlers []NamedHandler
+	for _, item := range *in {
 		InitHandler(log, registry, &item, &handlers)
 	}
 	return &handlers, nil
 }
 
-func InitHandler(log logrus.FieldLogger, registry *prometheus.Registry, item *NamedHandler, handlers *Handlers) error {
-	handlers.Handlers = append(handlers.Handlers, *item)
+func InitHandler(log logrus.FieldLogger, registry *prometheus.Registry, item *NamedHandler, handlers *[]NamedHandler) error {
+	*handlers = append(*handlers, *item)
 
 	if err := item.Handler.Init(registry, item.MetricConfig); err != nil {
 		return fmt.Errorf("unable to initialize metric '%s': %w", item.Name, err)
@@ -96,11 +91,11 @@ func InitHandler(log logrus.FieldLogger, registry *prometheus.Registry, item *Na
 	return nil
 }
 
-// ProcessFlow processes a flow by calling ProcessFlow it on to all enabled
+// ExecuteAllProcessFlow processes a flow by calling ProcessFlow on all enabled
 // metric handlers
-func (h Handlers) ProcessFlow(ctx context.Context, flow *pb.Flow) error {
+func ExecuteAllProcessFlow(ctx context.Context, flow *pb.Flow, handlers *[]NamedHandler) error {
 	var errs error
-	for _, nh := range h.Handlers {
+	for _, nh := range *handlers {
 		// Continue running the remaining metrics handlers, since one failing
 		// shouldn't impact the other metrics handlers.
 		errs = errors.Join(errs, nh.Handler.ProcessFlow(ctx, flow))
@@ -110,8 +105,8 @@ func (h Handlers) ProcessFlow(ctx context.Context, flow *pb.Flow) error {
 
 // ProcessCiliumEndpointDeletion queries all handlers for a list of MetricVec and removes
 // metrics directly associated to pod of the deleted cilium endpoint.
-func (h Handlers) ProcessCiliumEndpointDeletion(endpoint *types.CiliumEndpoint) {
-	for _, h := range h.Handlers {
+func ProcessCiliumEndpointDeletion(endpoint *types.CiliumEndpoint, handlers *[]NamedHandler) {
+	for _, h := range *handlers {
 		for _, mv := range h.Handler.ListMetricVec() {
 			if ctx := h.Handler.Context(); ctx != nil {
 				ctx.DeleteMetricsAssociatedWithPod(endpoint.GetName(), endpoint.GetNamespace(), mv)

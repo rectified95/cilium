@@ -23,7 +23,7 @@ type DynamicFlowProcessor struct {
 	watcher *metricConfigWatcher
 	// Protects against deregistering metric handlers while ProcessFlow is executing, or concurrent config reloads.
 	mutex    lock.RWMutex
-	Metrics  *api.Handlers
+	Metrics  []api.NamedHandler
 	registry *prometheus.Registry
 }
 
@@ -40,7 +40,7 @@ func (d *DynamicFlowProcessor) OnDecodedFlow(ctx context.Context, flow *flowpb.F
 
 	var errs error
 	if d.Metrics != nil {
-		errs = d.Metrics.ProcessFlow(ctx, flow)
+		errs = api.ExecuteAllProcessFlow(ctx, flow, &d.Metrics)
 	}
 
 	if errs != nil {
@@ -68,13 +68,13 @@ func (d *DynamicFlowProcessor) onConfigReload(ctx context.Context, isSameHash bo
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
 
-	var newHandlers api.Handlers
+	var newHandlers []api.NamedHandler
 	metricNames := config.GetMetricNames()
 
-	curHandlerMap := make(map[string]api.NamedHandler)
+	curHandlerMap := make(map[string]*api.NamedHandler)
 	if d.Metrics != nil {
-		for _, m := range d.Metrics.Handlers {
-			curHandlerMap[m.Name] = m
+		for _, m := range d.Metrics {
+			curHandlerMap[m.Name] = &m
 		}
 
 		configuredMetricNames := make(map[string]*api.MetricConfig)
@@ -83,7 +83,7 @@ func (d *DynamicFlowProcessor) onConfigReload(ctx context.Context, isSameHash bo
 		}
 		// Unregister handlers not present in the new config.
 		// This needs to happen first to properly check for conflicting plugins later during registration.
-		for _, m := range d.Metrics.Handlers {
+		for _, m := range d.Metrics {
 			if _, ok := configuredMetricNames[m.Name]; !ok {
 				h := curHandlerMap[m.Name]
 				h.Handler.Deinit(d.registry)
@@ -93,7 +93,7 @@ func (d *DynamicFlowProcessor) onConfigReload(ctx context.Context, isSameHash bo
 	}
 
 	for _, v := range curHandlerMap {
-		newHandlers.Handlers = append(newHandlers.Handlers, v)
+		newHandlers = append(newHandlers, *v)
 	}
 
 	for _, cm := range config.Metrics {
@@ -115,10 +115,10 @@ func (d *DynamicFlowProcessor) onConfigReload(ctx context.Context, isSameHash bo
 			d.addNewMetric(d.registry, cm, metricNames, &newHandlers)
 		}
 	}
-	d.Metrics = &newHandlers
+	d.Metrics = newHandlers
 }
 
-func (d *DynamicFlowProcessor) addNewMetric(reg *prometheus.Registry, cm *api.MetricConfig, metricNames map[string]struct{}, newMetrics *api.Handlers) {
+func (d *DynamicFlowProcessor) addNewMetric(reg *prometheus.Registry, cm *api.MetricConfig, metricNames map[string]struct{}, newMetrics *[]api.NamedHandler) {
 	nh, err := api.DefaultRegistry().ValidateAndCreateHandler(reg, cm, &metricNames)
 	if err != nil {
 		d.logger.WithFields(logrus.Fields{

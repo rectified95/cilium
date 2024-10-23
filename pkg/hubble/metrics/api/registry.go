@@ -47,7 +47,7 @@ type NamedHandler struct {
 // ConfigureHandlers enables a set of metric handlers and initializes them.
 // Only metrics handlers which have been previously registered via the
 // Register() function can be configured.
-func (r *Registry) ConfigureHandlers(registry *prometheus.Registry, enabled *Config) (*Handlers, error) {
+func (r *Registry) ConfigureHandlers(registry *prometheus.Registry, enabled *Config) (*[]NamedHandler, error) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
@@ -61,7 +61,7 @@ func (r *Registry) ConfigureHandlers(registry *prometheus.Registry, enabled *Con
 		enabledHandlers = append(enabledHandlers, *h)
 	}
 
-	return InitHandlers(r.log, registry, enabledHandlers)
+	return InitHandlers(r.log, registry, &enabledHandlers)
 }
 
 func (r *Registry) ValidateAndCreateHandler(registry *prometheus.Registry, metricsConfig *MetricConfig, metricNames *map[string]struct{}) (*NamedHandler, error) {
