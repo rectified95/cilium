@@ -61,7 +61,7 @@ func (r *Registry) ConfigureHandlers(registry *prometheus.Registry, enabled *Con
 		enabledHandlers = append(enabledHandlers, *h)
 	}
 
-	return InitHandlersAndFlowProcessors(r.log, registry, enabledHandlers)
+	return InitHandlers(r.log, registry, enabledHandlers)
 }
 
 func (r *Registry) ValidateAndCreateHandler(registry *prometheus.Registry, metricsConfig *MetricConfig, metricNames *map[string]struct{}) (*NamedHandler, error) {

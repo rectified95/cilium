@@ -26,8 +26,7 @@ const (
 
 // Handlers contains all the metrics handlers.
 type Handlers struct {
-	Handlers       []NamedHandler
-	flowProcessors []FlowProcessor
+	Handlers []NamedHandler
 }
 
 // Plugin is a metric plugin. A metric plugin is associated a name and is
@@ -68,31 +67,22 @@ type Handler interface {
 	// Deinit deregisters the metrics from the Prometheus registry
 	// and cleans up internal handler state
 	Deinit(registry *prometheus.Registry) bool
-}
 
-// FlowProcessor is a metric handler which requires flows to perform metrics
-// accounting.
-// It is called upon receival of raw event data and is responsible
-// to perform metrics accounting according to the scope of the metrics plugin.
-type FlowProcessor interface {
 	// ProcessFlow must processes a flow event and perform metrics
 	// accounting
 	ProcessFlow(ctx context.Context, flow *pb.Flow) error
 }
 
-func InitHandlersAndFlowProcessors(log logrus.FieldLogger, registry *prometheus.Registry, in []NamedHandler) (*Handlers, error) {
+func InitHandlers(log logrus.FieldLogger, registry *prometheus.Registry, in []NamedHandler) (*Handlers, error) {
 	var handlers Handlers
 	for _, item := range in {
-		InitHandlersAndFlowProcessor(log, registry, &item, &handlers)
+		InitHandler(log, registry, &item, &handlers)
 	}
 	return &handlers, nil
 }
 
-func InitHandlersAndFlowProcessor(log logrus.FieldLogger, registry *prometheus.Registry, item *NamedHandler, handlers *Handlers) error {
+func InitHandler(log logrus.FieldLogger, registry *prometheus.Registry, item *NamedHandler, handlers *Handlers) error {
 	handlers.Handlers = append(handlers.Handlers, *item)
-	if fp, ok := item.Handler.(FlowProcessor); ok {
-		handlers.flowProcessors = append(handlers.flowProcessors, fp)
-	}
 
 	if err := item.Handler.Init(registry, item.MetricConfig); err != nil {
 		return fmt.Errorf("unable to initialize metric '%s': %w", item.Name, err)
@@ -110,10 +100,10 @@ func InitHandlersAndFlowProcessor(log logrus.FieldLogger, registry *prometheus.R
 // metric handlers
 func (h Handlers) ProcessFlow(ctx context.Context, flow *pb.Flow) error {
 	var errs error
-	for _, fp := range h.flowProcessors {
+	for _, nh := range h.Handlers {
 		// Continue running the remaining metrics handlers, since one failing
 		// shouldn't impact the other metrics handlers.
-		errs = errors.Join(errs, fp.ProcessFlow(ctx, flow))
+		errs = errors.Join(errs, nh.Handler.ProcessFlow(ctx, flow))
 	}
 	return errs
 }
