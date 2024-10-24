@@ -105,7 +105,7 @@ func TestHubbleServerStandalone(t *testing.T) {
 func TestReadMetricConfigFromCM(t *testing.T) {
 	watcher := metricConfigWatcher{configFilePath: "testdata/valid_metric_config_drop_flow.yaml", cfgStore: make(map[string]*api.MetricConfig)}
 	cfg, _, _, err := watcher.readConfig()
-	require.Nil(t, err)
+	require.NoError(t, err)
 
 	expectedConfigs := []api.MetricConfig{
 		{
@@ -181,7 +181,7 @@ func TestHandlersUpdatedInDfpOnConfigChange(t *testing.T) {
 	// Handlers: +drop
 	watcher := metricConfigWatcher{configFilePath: "testdata/valid_metric_config_drop.yaml", cfgStore: make(map[string]*api.MetricConfig)}
 	cfg, _, _, err := watcher.readConfig()
-	require.Nil(t, err)
+	require.NoError(t, err)
 
 	reg := prometheus.NewPedanticRegistry()
 	dfp := DynamicFlowProcessor{registry: reg}
@@ -192,7 +192,7 @@ func TestHandlersUpdatedInDfpOnConfigChange(t *testing.T) {
 	// Handlers: =drop, +flow
 	watcher.resetCfgPath("testdata/valid_metric_config_drop_flow.yaml")
 	cfg, _, _, err = watcher.readConfig()
-	require.Nil(t, err)
+	require.NoError(t, err)
 
 	dfp.onConfigReload(context.TODO(), false, 0, *cfg)
 	assertHandlersInDfp(t, &dfp, cfg)
@@ -200,7 +200,7 @@ func TestHandlersUpdatedInDfpOnConfigChange(t *testing.T) {
 	// Handlers: -drop, =flow
 	watcher.resetCfgPath("testdata/valid_metric_config_flow.yaml")
 	cfg, _, _, err = watcher.readConfig()
-	require.Nil(t, err)
+	require.NoError(t, err)
 
 	dfp.onConfigReload(context.TODO(), false, 0, *cfg)
 	assertHandlersInDfp(t, &dfp, cfg)
@@ -219,7 +219,7 @@ func TestMetricReRegisterAndCollect(t *testing.T) {
 	// Handlers: +drop
 	watcher := metricConfigWatcher{configFilePath: "testdata/valid_metric_config_drop.yaml", cfgStore: make(map[string]*api.MetricConfig)}
 	cfg, _, _, err := watcher.readConfig()
-	require.Nil(t, err)
+	require.NoError(t, err)
 
 	reg := prometheus.NewPedanticRegistry()
 	dfp := DynamicFlowProcessor{registry: reg}
@@ -240,7 +240,7 @@ func TestMetricReRegisterAndCollect(t *testing.T) {
 	}
 
 	_, errs := dfp.OnDecodedFlow(context.TODO(), flow1)
-	assert.Nil(t, errs)
+	assert.NoError(t, errs)
 
 	metricFamilies, err := reg.Gather()
 	require.NoError(t, err)
@@ -250,10 +250,10 @@ func TestMetricReRegisterAndCollect(t *testing.T) {
 	// Read in empty config.
 	watcher.resetCfgPath("testdata/valid_empty_metric_cfg.yaml")
 	cfg, _, _, err = watcher.readConfig()
-	require.Nil(t, err)
+	require.NoError(t, err)
 
 	dfp.onConfigReload(context.TODO(), false, 0, *cfg)
-	assert.Nil(t, errs)
+	assert.NoError(t, errs)
 
 	// The existing drop metrics should be removed after the handler is deregistered.
 	metricFamilies, err = reg.Gather()
@@ -263,13 +263,13 @@ func TestMetricReRegisterAndCollect(t *testing.T) {
 	// Re-register drop handler with same config and collect metrics.
 	watcher.resetCfgPath("testdata/valid_metric_config_drop.yaml")
 	cfg, _, _, err = watcher.readConfig()
-	require.Nil(t, err)
+	require.NoError(t, err)
 
 	dfp.onConfigReload(context.TODO(), false, 0, *cfg)
-	assert.Nil(t, errs)
+	assert.NoError(t, errs)
 
 	_, errs = dfp.OnDecodedFlow(context.TODO(), flow1)
-	assert.Nil(t, errs)
+	assert.NoError(t, errs)
 
 	metricFamilies, err = reg.Gather()
 	require.NoError(t, err)
@@ -309,7 +309,7 @@ func ConfigureAndFetchDynamicMetrics(t *testing.T, testName string, exportedMetr
 		// Handlers: +drop, +flow
 		watcher := metricConfigWatcher{configFilePath: "testdata/valid_metric_config_drop_flow.yaml", cfgStore: make(map[string]*api.MetricConfig)}
 		cfg, _, _, err := watcher.readConfig()
-		require.Nil(t, err)
+		require.NoError(t, err)
 
 		dfp := DynamicFlowProcessor{registry: reg}
 		dfp.onConfigReload(context.TODO(), false, 0, *cfg)
@@ -329,10 +329,10 @@ func ConfigureAndFetchDynamicMetrics(t *testing.T, testName string, exportedMetr
 		}
 
 		_, errs := dfp.OnDecodedFlow(context.TODO(), flow1)
-		assert.Nil(t, errs)
+		assert.NoError(t, errs)
 
 		resp, err := http.Get("http://" + srv.Listener.Addr().String() + "/metrics")
-		require.Nil(t, err)
+		require.NoError(t, err)
 		require.Equal(t, http.StatusOK, resp.StatusCode)
 
 		assertMetricsFromServer(t, resp.Body, exportedMetrics)
