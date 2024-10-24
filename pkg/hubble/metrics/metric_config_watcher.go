@@ -26,7 +26,7 @@ var metricReloadInterval = 10 * time.Second
 type metricConfigWatcher struct {
 	logger         logrus.FieldLogger
 	configFilePath string
-	callback       func(ctx context.Context, isSameHash bool, hash uint64, config api.Config)
+	callback       func(ctx context.Context, hash uint64, config api.Config)
 	ticker         *time.Ticker
 	stop           chan bool
 	currentCfgHash uint64
@@ -39,7 +39,7 @@ type metricConfigWatcher struct {
 // reconciled.
 func NewMetricConfigWatcher(
 	configFilePath string,
-	callback func(ctx context.Context, isSameHash bool, hash uint64, config api.Config),
+	callback func(ctx context.Context, hash uint64, config api.Config),
 ) *metricConfigWatcher {
 	watcher := &metricConfigWatcher{
 		logger:         logrus.New().WithField(logfields.LogSubsys, "hubble").WithField("configFilePath", configFilePath),
@@ -75,7 +75,9 @@ func (c *metricConfigWatcher) reload() {
 	if err != nil {
 		c.logger.WithError(err).Error("failed reading dynamic exporter config")
 	} else {
-		c.callback(context.TODO(), isSameHash, hash, *config)
+		if !isSameHash {
+			c.callback(context.TODO(), hash, *config)
+		}
 	}
 }
 

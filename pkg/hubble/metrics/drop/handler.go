@@ -30,15 +30,7 @@ func (h *dropHandler) Init(registry *prometheus.Registry, options *api.MetricCon
 		return err
 	}
 	h.context = c
-	h.cfg = options
-	h.AllowList, err = filters.BuildFilterList(context.Background(), h.cfg.IncludeFilters, filters.DefaultFilters(logrus.New()))
-	if err != nil {
-		return err
-	}
-	h.DenyList, err = filters.BuildFilterList(context.Background(), h.cfg.ExcludeFilters, filters.DefaultFilters(logrus.New()))
-	if err != nil {
-		return err
-	}
+	err = h.HandleConfigurationUpdate(options)
 
 	contextLabels := h.context.GetLabelNames()
 	labels := append(contextLabels, "reason", "protocol")
@@ -87,4 +79,22 @@ func (h *dropHandler) ProcessFlow(ctx context.Context, flow *flowpb.Flow) error 
 
 func (h *dropHandler) Deinit(registry *prometheus.Registry) bool {
 	return registry.Unregister(h.drops)
+}
+
+func (h *dropHandler) HandleConfigurationUpdate(cfg *api.MetricConfig) error {
+	return h.SetFilters(cfg)
+}
+
+func (h *dropHandler) SetFilters(cfg *api.MetricConfig) error {
+	var err error
+	h.cfg = cfg
+	h.AllowList, err = filters.BuildFilterList(context.Background(), h.cfg.IncludeFilters, filters.DefaultFilters(logrus.New()))
+	if err != nil {
+		return err
+	}
+	h.DenyList, err = filters.BuildFilterList(context.Background(), h.cfg.ExcludeFilters, filters.DefaultFilters(logrus.New()))
+	if err != nil {
+		return err
+	}
+	return nil
 }

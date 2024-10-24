@@ -62,6 +62,10 @@ func (t *testHandler) Deinit(registry *prometheus.Registry) bool {
 	return true
 }
 
+func (h *testHandler) HandleConfigurationUpdate(cfg *MetricConfig) error {
+	return nil
+}
+
 func (t *testHandler) ProcessFlow(ctx context.Context, p *pb.Flow) error {
 	labels, _ := t.ContextOptions.GetLabelValues(p)
 	t.counter.WithLabelValues(labels...).Inc()

@@ -43,12 +43,7 @@ func (h *flowsToWorldHandler) Init(registry *prometheus.Registry, options *api.M
 		return err
 	}
 	h.context = c
-	h.cfg = options
-	h.AllowList, err = filters.BuildFilterList(context.Background(), h.cfg.IncludeFilters, filters.DefaultFilters(logrus.New()))
-	if err != nil {
-		return err
-	}
-	h.DenyList, err = filters.BuildFilterList(context.Background(), h.cfg.ExcludeFilters, filters.DefaultFilters(logrus.New()))
+	err = h.HandleConfigurationUpdate(options)
 	if err != nil {
 		return err
 	}
@@ -163,4 +158,22 @@ func (h *flowsToWorldHandler) ProcessFlow(_ context.Context, flow *flowpb.Flow) 
 
 func (h *flowsToWorldHandler) Deinit(registry *prometheus.Registry) bool {
 	return registry.Unregister(h.flowsToWorld)
+}
+
+func (h *flowsToWorldHandler) HandleConfigurationUpdate(cfg *api.MetricConfig) error {
+	return h.SetFilters(cfg)
+}
+
+func (h *flowsToWorldHandler) SetFilters(cfg *api.MetricConfig) error {
+	var err error
+	h.cfg = cfg
+	h.AllowList, err = filters.BuildFilterList(context.Background(), h.cfg.IncludeFilters, filters.DefaultFilters(logrus.New()))
+	if err != nil {
+		return err
+	}
+	h.DenyList, err = filters.BuildFilterList(context.Background(), h.cfg.ExcludeFilters, filters.DefaultFilters(logrus.New()))
+	if err != nil {
+		return err
+	}
+	return nil
 }

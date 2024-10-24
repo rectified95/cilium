@@ -33,12 +33,7 @@ func (h *kafkaHandler) Init(registry *prometheus.Registry, options *api.MetricCo
 		return err
 	}
 	h.context = c
-	h.cfg = options
-	h.AllowList, err = filters.BuildFilterList(context.Background(), h.cfg.IncludeFilters, filters.DefaultFilters(logrus.New()))
-	if err != nil {
-		return err
-	}
-	h.DenyList, err = filters.BuildFilterList(context.Background(), h.cfg.ExcludeFilters, filters.DefaultFilters(logrus.New()))
+	err = h.HandleConfigurationUpdate(options)
 	if err != nil {
 		return err
 	}
@@ -111,4 +106,22 @@ func (h *kafkaHandler) ProcessFlow(ctx context.Context, flow *flowpb.Flow) error
 
 func (h *kafkaHandler) Deinit(registry *prometheus.Registry) bool {
 	return registry.Unregister(h.requests) || registry.Unregister(h.duration)
+}
+
+func (h *kafkaHandler) HandleConfigurationUpdate(cfg *api.MetricConfig) error {
+	return h.SetFilters(cfg)
+}
+
+func (h *kafkaHandler) SetFilters(cfg *api.MetricConfig) error {
+	var err error
+	h.cfg = cfg
+	h.AllowList, err = filters.BuildFilterList(context.Background(), h.cfg.IncludeFilters, filters.DefaultFilters(logrus.New()))
+	if err != nil {
+		return err
+	}
+	h.DenyList, err = filters.BuildFilterList(context.Background(), h.cfg.ExcludeFilters, filters.DefaultFilters(logrus.New()))
+	if err != nil {
+		return err
+	}
+	return nil
 }

@@ -31,12 +31,7 @@ func (h *tcpHandler) Init(registry *prometheus.Registry, options *api.MetricConf
 		return err
 	}
 	h.context = c
-	h.cfg = options
-	h.AllowList, err = filters.BuildFilterList(context.Background(), h.cfg.IncludeFilters, filters.DefaultFilters(logrus.New()))
-	if err != nil {
-		return err
-	}
-	h.DenyList, err = filters.BuildFilterList(context.Background(), h.cfg.ExcludeFilters, filters.DefaultFilters(logrus.New()))
+	err = h.HandleConfigurationUpdate(options)
 	if err != nil {
 		return err
 	}
@@ -113,4 +108,22 @@ func (h *tcpHandler) ProcessFlow(ctx context.Context, flow *flowpb.Flow) error {
 
 func (h *tcpHandler) Deinit(registry *prometheus.Registry) bool {
 	return registry.Unregister(h.tcpFlags)
+}
+
+func (h *tcpHandler) HandleConfigurationUpdate(cfg *api.MetricConfig) error {
+	return h.SetFilters(cfg)
+}
+
+func (h *tcpHandler) SetFilters(cfg *api.MetricConfig) error {
+	var err error
+	h.cfg = cfg
+	h.AllowList, err = filters.BuildFilterList(context.Background(), h.cfg.IncludeFilters, filters.DefaultFilters(logrus.New()))
+	if err != nil {
+		return err
+	}
+	h.DenyList, err = filters.BuildFilterList(context.Background(), h.cfg.ExcludeFilters, filters.DefaultFilters(logrus.New()))
+	if err != nil {
+		return err
+	}
+	return nil
 }

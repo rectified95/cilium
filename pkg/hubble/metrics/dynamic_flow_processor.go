@@ -60,11 +60,7 @@ func NewDynamicFlowProcessor(reg *prometheus.Registry, logger logrus.FieldLogger
 	return dynamicFlowProcessor
 }
 
-func (d *DynamicFlowProcessor) onConfigReload(ctx context.Context, isSameHash bool, hash uint64, config api.Config) {
-	if isSameHash {
-		return
-	}
-
+func (d *DynamicFlowProcessor) onConfigReload(ctx context.Context, hash uint64, config api.Config) {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
 
@@ -92,10 +88,6 @@ func (d *DynamicFlowProcessor) onConfigReload(ctx context.Context, isSameHash bo
 		}
 	}
 
-	for _, v := range curHandlerMap {
-		newHandlers = append(newHandlers, *v)
-	}
-
 	for _, cm := range config.Metrics {
 		// Existing handler matches new config entry:
 		//   no-op, if config unchanged;
@@ -105,16 +97,21 @@ func (d *DynamicFlowProcessor) onConfigReload(ctx context.Context, isSameHash bo
 				continue
 			} else {
 				if h, ok := curHandlerMap[cm.Name]; ok {
-					h.Handler.Deinit(d.registry)
-					delete(curHandlerMap, cm.Name)
+					// TODO what about the error here?
+					h.Handler.HandleConfigurationUpdate(cm)
+					// TODO add test just updating filters
 				}
-				d.addNewMetric(d.registry, cm, metricNames, &newHandlers)
 			}
 		} else {
 			// New handler found in config.
 			d.addNewMetric(d.registry, cm, metricNames, &newHandlers)
 		}
 	}
+
+	for _, v := range curHandlerMap {
+		newHandlers = append(newHandlers, *v)
+	}
+
 	d.Metrics = newHandlers
 }
 

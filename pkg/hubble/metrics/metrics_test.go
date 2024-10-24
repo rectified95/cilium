@@ -186,7 +186,7 @@ func TestHandlersUpdatedInDfpOnConfigChange(t *testing.T) {
 	reg := prometheus.NewPedanticRegistry()
 	dfp := DynamicFlowProcessor{registry: reg}
 	assert.Nil(t, dfp.Metrics)
-	dfp.onConfigReload(context.TODO(), false, 0, *cfg)
+	dfp.onConfigReload(context.TODO(), 0, *cfg)
 	assertHandlersInDfp(t, &dfp, cfg)
 
 	// Handlers: =drop, +flow
@@ -194,7 +194,7 @@ func TestHandlersUpdatedInDfpOnConfigChange(t *testing.T) {
 	cfg, _, _, err = watcher.readConfig()
 	require.NoError(t, err)
 
-	dfp.onConfigReload(context.TODO(), false, 0, *cfg)
+	dfp.onConfigReload(context.TODO(), 0, *cfg)
 	assertHandlersInDfp(t, &dfp, cfg)
 
 	// Handlers: -drop, =flow
@@ -202,7 +202,7 @@ func TestHandlersUpdatedInDfpOnConfigChange(t *testing.T) {
 	cfg, _, _, err = watcher.readConfig()
 	require.NoError(t, err)
 
-	dfp.onConfigReload(context.TODO(), false, 0, *cfg)
+	dfp.onConfigReload(context.TODO(), 0, *cfg)
 	assertHandlersInDfp(t, &dfp, cfg)
 }
 
@@ -223,7 +223,7 @@ func TestMetricReRegisterAndCollect(t *testing.T) {
 
 	reg := prometheus.NewPedanticRegistry()
 	dfp := DynamicFlowProcessor{registry: reg}
-	dfp.onConfigReload(context.TODO(), false, 0, *cfg)
+	dfp.onConfigReload(context.TODO(), 0, *cfg)
 
 	flow1 := &pb.Flow{
 		EventType: &pb.CiliumEventType{Type: monitorAPI.MessageTypePolicyVerdict},
@@ -252,7 +252,7 @@ func TestMetricReRegisterAndCollect(t *testing.T) {
 	cfg, _, _, err = watcher.readConfig()
 	require.NoError(t, err)
 
-	dfp.onConfigReload(context.TODO(), false, 0, *cfg)
+	dfp.onConfigReload(context.TODO(), 0, *cfg)
 	assert.NoError(t, errs)
 
 	// The existing drop metrics should be removed after the handler is deregistered.
@@ -265,7 +265,7 @@ func TestMetricReRegisterAndCollect(t *testing.T) {
 	cfg, _, _, err = watcher.readConfig()
 	require.NoError(t, err)
 
-	dfp.onConfigReload(context.TODO(), false, 0, *cfg)
+	dfp.onConfigReload(context.TODO(), 0, *cfg)
 	assert.NoError(t, errs)
 
 	_, errs = dfp.OnDecodedFlow(context.TODO(), flow1)
@@ -312,7 +312,7 @@ func ConfigureAndFetchDynamicMetrics(t *testing.T, testName string, exportedMetr
 		require.NoError(t, err)
 
 		dfp := DynamicFlowProcessor{registry: reg}
-		dfp.onConfigReload(context.TODO(), false, 0, *cfg)
+		dfp.onConfigReload(context.TODO(), 0, *cfg)
 
 		flow1 := &pb.Flow{
 			EventType: &pb.CiliumEventType{Type: monitorAPI.MessageTypePolicyVerdict},
