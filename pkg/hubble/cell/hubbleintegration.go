@@ -26,10 +26,10 @@ import (
 	"github.com/cilium/cilium/pkg/crypto/certloader"
 	"github.com/cilium/cilium/pkg/datapath/link"
 	"github.com/cilium/cilium/pkg/endpointmanager"
+	v1 "github.com/cilium/cilium/pkg/hubble/api/v1"
 	"github.com/cilium/cilium/pkg/hubble/container"
 	"github.com/cilium/cilium/pkg/hubble/dropeventemitter"
 	"github.com/cilium/cilium/pkg/hubble/exporter"
-	"github.com/cilium/cilium/pkg/hubble/exporter/exporteroption"
 	"github.com/cilium/cilium/pkg/hubble/metrics"
 	"github.com/cilium/cilium/pkg/hubble/metrics/api"
 	"github.com/cilium/cilium/pkg/hubble/monitor"
@@ -65,7 +65,8 @@ import (
 // (TCP, UNIX domain socket), the Hubble metrics server, etc.
 type hubbleIntegration struct {
 	// Observer will be set once the Hubble Observer has been started.
-	observer atomic.Pointer[observer.LocalObserverServer]
+	observer        atomic.Pointer[observer.LocalObserverServer]
+	observerOptions []observeroption.Option
 
 	identityAllocator identitycell.CachingIdentityAllocator
 	endpointManager   endpointmanager.EndpointManager
@@ -78,6 +79,7 @@ type hubbleIntegration struct {
 	nodeLocalStore    *node.LocalNodeStore
 	monitorAgent      monitorAgent.Agent
 	recorder          *recorder.Recorder
+	exporters         []exporter.FlowLogExporter
 
 	// NOTE: we still need DaemonConfig for the shared EnableRecorder flag.
 	agentConfig *option.DaemonConfig
@@ -100,6 +102,8 @@ func new(
 	nodeLocalStore *node.LocalNodeStore,
 	monitorAgent monitorAgent.Agent,
 	recorder *recorder.Recorder,
+	observerOptions []observeroption.Option,
+	exporters []exporter.FlowLogExporter,
 	agentConfig *option.DaemonConfig,
 	config config,
 	log logrus.FieldLogger,
@@ -122,6 +126,8 @@ func new(
 		nodeLocalStore:    nodeLocalStore,
 		monitorAgent:      monitorAgent,
 		recorder:          recorder,
+		observerOptions:   observerOptions,
+		exporters:         exporters,
 		agentConfig:       agentConfig,
 		config:            config,
 		log:               log,
@@ -335,16 +341,55 @@ func (h *hubbleIntegration) launch(ctx context.Context) {
 
 	var srv *http.Server
 	if h.config.MetricsServer != "" {
-		h.log.WithFields(logrus.Fields{
-			"address": h.config.MetricsServer,
-			"metrics": h.config.Metrics,
-			"tls":     h.config.EnableMetricsServerTLS,
-		}).Info("Starting Hubble Metrics server")
+		switch {
+		case h.config.DynamicMetricConfigFilePath != "" && len(h.config.Metrics) > 0:
+			{
+				h.log.Error("Cannot configure both static and dynamic Hubble metrics")
+				return
+			}
+		case h.config.DynamicMetricConfigFilePath != "":
+			{
+				h.log.WithFields(logrus.Fields{
+					"address":      h.config.MetricsServer,
+					"metricConfig": h.config.DynamicMetricConfigFilePath,
+					"tls":          h.config.EnableMetricsServerTLS,
+				}).Info("Starting Hubble server with dynamically configurable metrics")
 
-		err := metrics.InitMetrics(metrics.Registry, api.ParseStaticMetricsConfig(h.config.Metrics), grpcMetrics)
-		if err != nil {
-			h.log.WithError(err).Error("Unable to setup metrics: %w", err)
-			return
+				metrics.InitHubbleInternalMetrics(metrics.Registry, grpcMetrics)
+				dynamicFp := metrics.NewDynamicFlowProcessor(metrics.Registry, h.log, h.config.DynamicMetricConfigFilePath)
+				observerOpts = append(observerOpts, observeroption.WithOnDecodedFlow(dynamicFp))
+			}
+		case len(h.config.Metrics) > 0:
+			{
+				h.log.WithFields(logrus.Fields{
+					"address": h.config.MetricsServer,
+					"metrics": h.config.Metrics,
+					"tls":     h.config.EnableMetricsServerTLS,
+				}).Info("Starting Hubble Metrics server")
+
+				err := metrics.InitMetrics(metrics.Registry, api.ParseStaticMetricsConfig(h.config.Metrics), grpcMetrics)
+				if err != nil {
+					h.log.WithError(err).Error("Unable to setup metrics: %w", err)
+					return
+				}
+
+				observerOpts = append(observerOpts,
+					observeroption.WithOnDecodedFlowFunc(func(ctx context.Context, flow *flowpb.Flow) (bool, error) {
+						if metrics.EnabledMetrics != nil {
+							var errs error
+							for _, nh := range metrics.EnabledMetrics {
+								// Continue running the remaining metrics handlers, since one failing
+								// shouldn't impact the other metrics handlers.
+								errs = errors.Join(errs, nh.Handler.ProcessFlow(ctx, flow))
+							}
+							if errs != nil {
+								h.log.WithError(err).Error("Failed to ProcessFlow in metrics handler")
+							}
+						}
+						return false, nil
+					}),
+				)
+			}
 		}
 
 		srv = &http.Server{
@@ -359,16 +404,6 @@ func (h *hubbleIntegration) launch(ctx context.Context) {
 				return
 			}
 		}()
-
-		observerOpts = append(observerOpts,
-			observeroption.WithOnDecodedFlowFunc(func(ctx context.Context, flow *flowpb.Flow) (bool, error) {
-				err := metrics.ProcessFlow(ctx, flow)
-				if err != nil {
-					h.log.WithError(err).Error("Failed to ProcessFlow in metrics handler")
-				}
-				return false, nil
-			}),
-		)
 
 		localSrvOpts = append(localSrvOpts,
 			serveroption.WithGRPCMetrics(grpcMetrics),
@@ -406,31 +441,18 @@ func (h *hubbleIntegration) launch(ctx context.Context) {
 		observeroption.WithMaxFlows(maxFlows),
 		observeroption.WithMonitorBuffer(h.config.EventQueueSize),
 	)
-	if h.config.ExportFilePath != "" {
-		exporterOpts := []exporteroption.Option{
-			exporteroption.WithPath(h.config.ExportFilePath),
-			exporteroption.WithMaxSizeMB(h.config.ExportFileMaxSizeMB),
-			exporteroption.WithMaxBackups(h.config.ExportFileMaxBackups),
-			exporteroption.WithAllowList(h.log, h.config.ExportAllowlist),
-			exporteroption.WithDenyList(h.log, h.config.ExportDenylist),
-			exporteroption.WithFieldMask(h.config.ExportFieldmask),
-		}
-		if h.config.ExportFileCompress {
-			exporterOpts = append(exporterOpts, exporteroption.WithCompress())
-		}
-		hubbleExporter, err := exporter.NewExporter(ctx, h.log, exporterOpts...)
-		if err != nil {
-			h.log.WithError(err).Error("Failed to configure Hubble export")
-		} else {
-			opt := observeroption.WithOnDecodedEvent(hubbleExporter)
-			observerOpts = append(observerOpts, opt)
-		}
+
+	// register exporters
+	for _, exporter := range h.exporters {
+		observerOpts = append(observerOpts, observeroption.WithOnDecodedEventFunc(func(ctx context.Context, e *v1.Event) (bool, error) {
+			return false, exporter.Export(ctx, e)
+		}))
 	}
-	if h.config.FlowlogsConfigFilePath != "" {
-		dynamicHubbleExporter := exporter.NewDynamicExporter(h.log, h.config.FlowlogsConfigFilePath, h.config.ExportFileMaxSizeMB, h.config.ExportFileMaxBackups)
-		opt := observeroption.WithOnDecodedEvent(dynamicHubbleExporter)
-		observerOpts = append(observerOpts, opt)
-	}
+
+	// register injected observer options last to allow
+	// for explicit ordering of known dependencies
+	observerOpts = append(observerOpts, h.observerOptions...)
+
 	namespaceManager := observer.NewNamespaceManager()
 	go namespaceManager.Run(ctx)
 

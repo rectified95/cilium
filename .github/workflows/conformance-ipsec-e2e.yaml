@@ -179,6 +179,7 @@ jobs:
           egress-gateway: ${{ matrix.egress-gateway }}
           host-fw: ${{ matrix.host-fw }}
           ingress-controller: ${{ matrix.ingress-controller }}
+          mutual-auth: false
           misc: ${{ matrix.misc }}
 
       - name: Set Kind params
@@ -198,6 +199,19 @@ jobs:
           kernel: ${{ matrix.kernel }}
           kind-params: "${{ steps.kind-params.outputs.params }}"
           kind-image: ${{ env.KIND_K8S_IMAGE }}
+
+      - name: Start Cilium KVStore
+        id: kvstore
+        if: matrix.kvstore == 'true'
+        run: |
+          make kind-kvstore-start KVSTORE_POD_NAME=kvstore KVSTORE_POD_PORT=2378
+
+          IP=$(kubectl --namespace kube-system get pod kvstore -o jsonpath='{.status.hostIP}')
+          echo "config= \
+            --set=etcd.enabled=true \
+            --set=identityAllocationMode=kvstore \
+            --set=etcd.endpoints[0]=http://${IP}:2378 \
+          " >> $GITHUB_OUTPUT
 
       - name: Install Cilium CLI
         uses: cilium/cilium-cli@3286926bbf80fdd0103a372256459e577224f9f6 # v0.16.20
@@ -232,9 +246,7 @@ jobs:
           kubectl create -n kube-system secret generic cilium-ipsec-keys \
             --from-literal=keys="3+ ${key}"
 
-          cilium install ${{ steps.cilium-config.outputs.config }}
-          kubectl -n cilium-spire wait --for=condition=Ready pod -l app=spire-server --timeout=300s
-          kubectl -n cilium-spire wait --for=condition=Ready pod -l app=spire-agent --timeout=300s
+          cilium install ${{ steps.cilium-config.outputs.config }} ${{ steps.kvstore.outputs.config }}
 
           cilium status --wait
           kubectl get pods --all-namespaces -o wide
@@ -267,6 +279,12 @@ jobs:
             --test egress-gateway \
             --flush-ct
 
+      - name: Features tested after egress gateway tests
+        uses: ./.github/actions/feature-status
+        with:
+          title: "Summary of all features tested after egress gateway tests"
+          json-filename: "${{ env.job_name }} (${{ join(matrix.*, ', ') }}) - egress-gateway"
+
       - name: Start unencrypted packets check
         uses: ./.github/actions/bpftrace/start
         with:
@@ -285,6 +303,12 @@ jobs:
             --junit-property github_job_step="Run tests (${{ join(matrix.*, ', ') }})" \
             --test '!egress-gateway' \
             --flush-ct
+
+      - name: Features tested after running all other tests
+        uses: ./.github/actions/feature-status
+        with:
+          title: "Summary of all features tested after all other tests"
+          json-filename: "${{ env.job_name }} (${{ join(matrix.*, ', ') }}) - other tests"
 
       - name: Assert that no unencrypted packets are leaked
         uses: ./.github/actions/bpftrace/check
@@ -331,6 +355,12 @@ jobs:
             --test egress-gateway \
             --flush-ct
 
+      - name: Features tested after egress gateway tests after rotating ipsec keys
+        uses: ./.github/actions/feature-status
+        with:
+          title: "Summary of all features tested after egress gateway tests after rotating ipsec keys"
+          json-filename: "${{ env.job_name }} (${{ join(matrix.*, ', ') }}) - egress-gateway after rotating keys"
+
       - name: Start unencrypted packets check for tests
         uses: ./.github/actions/bpftrace/start
         with:
@@ -356,6 +386,12 @@ jobs:
             --test '!egress-gateway' \
             --flush-ct $TEST
 
+      - name: Features tested after running all other tests after rotating ipsec keys
+        uses: ./.github/actions/feature-status
+        with:
+          title: "Summary of all features tested after all other tests after rotating ipsec keys"
+          json-filename: "${{ env.job_name }} (${{ join(matrix.*, ', ') }}) - other tests after rotating keys"
+
       - name: Assert that no unencrypted packets are leaked during tests
         uses: ./.github/actions/bpftrace/check
 
@@ -367,6 +403,12 @@ jobs:
           cilium status
           mkdir -p cilium-sysdumps
           cilium sysdump --output-filename cilium-sysdump-${{ matrix.name }}-final
+
+          if [ "${{ matrix.kvstore }}" == "true" ]; then
+            echo
+            echo "# Retrieving Cilium etcd logs"
+            kubectl -n kube-system logs kvstore
+          fi
 
       - name: Upload artifacts
         if: ${{ !success() }}
@@ -381,6 +423,13 @@ jobs:
         with:
           name: cilium-junits-${{ matrix.name }}
           path: cilium-junits/*.xml
+
+      - name: Upload features tested
+        if: ${{ always() }}
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: features-tested-${{ matrix.name }}
+          path: ${{ env.job_name }}*.json
 
       - name: Publish Test Results As GitHub Summary
         if: ${{ always() }}
@@ -410,6 +459,12 @@ jobs:
         with:
           name: cilium-junits
           pattern: cilium-junits-*
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Merge Features tested
+        uses: ./.github/actions/merge-artifacts
+        with:
+          name: features-tested
+          pattern: features-tested-*
           token: ${{ secrets.GITHUB_TOKEN }}
 
   commit-status-final:

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"strings"
 	"sync"
 
 	"github.com/sirupsen/logrus"
@@ -273,6 +274,33 @@ func (rpm *Manager) OnAddService(svcID k8s.ServiceID) {
 	}
 }
 
+// EnsureService ensures that the LRP service is updated to the latest state.
+// It is called after synchronization is complete during agent startup.
+func (rpm *Manager) EnsureService(svcID k8s.ServiceID) (bool, error) {
+	rpm.mutex.Lock()
+	defer rpm.mutex.Unlock()
+
+	if len(rpm.policyConfigs) == 0 {
+		return false, nil
+	}
+
+	if svcName, found := strings.CutSuffix(svcID.Name, localRedirectSvcStr); found {
+		id := k8s.ServiceID{
+			Name:      svcName,
+			Namespace: svcID.Namespace,
+		}
+
+		if config, ok := rpm.policyConfigs[id]; ok && config.lrpType == lrpConfigTypeSvc {
+			if err := rpm.getAndUpsertPolicySvcConfig(config); err != nil {
+				return false, err
+			}
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
 // OnDeleteService handles Kubernetes service deletes, and deletes the internal state
 // for the policy config that might be associated with the service.
 func (rpm *Manager) OnDeleteService(svcID k8s.ServiceID) {
@@ -499,10 +527,6 @@ func (rpm *Manager) getAndUpsertPolicySvcConfig(config *LRPConfig) error {
 
 	case svcFrontendNamedPorts:
 		// Get service frontends with the clusterIP and the policy config named ports.
-		ports := make([]string, len(config.frontendMappings))
-		for i, mapping := range config.frontendMappings {
-			ports[i] = mapping.fePort
-		}
 		ip := rpm.svcCache.GetServiceFrontendIP(*config.serviceID, lb.SVCTypeClusterIP)
 		if ip == nil {
 			// The LRP will be applied when the selected service is added later.

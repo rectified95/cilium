@@ -72,7 +72,12 @@ Users (Alphabetically)
       D: AirQo uses Cilium as the CNI plugin
       U: CNI, Networking, NetworkPolicy, Cluster Mesh, Hubble, Kubernetes services
       L: @airqo-platform
-
+      
+    * N: Alauda
+      D: Alauda uses Cilium in the Alauda Container Platform product to provide high performance network,observability and security.
+      U: Networking, NetworkPolicy, Services, Observability
+      Q：@oilbeater
+      
     * N: Alibaba Cloud
       D: Alibaba Cloud is using Cilium together with Terway CNI as the high-performance ENI dataplane
       U: Networking, NetworkPolicy, Services, IPVLAN
@@ -504,6 +509,11 @@ Users (Alphabetically)
       U: bpf2go to compile a C source file into eBPF bytecode and then to Go
       L: https://netbird.io/knowledge-hub/using-xdp-ebpf-to-share-default-dns-port-between-resolvers
       Q: @braginini
+
+    * N: Netcloud AG
+      D: As a Swiss ICT company we are using Cilium as their CNI for mission critical, on premise k8s clusters.
+      U: Overlay Networking, CNI, Network Policy, Kube-Proxy Replacement, Service load-balancing
+      L: https://www.netcloud.ch
       
     * N: NETWAYS Web Services
       D: NETWAYS Web Services offers Cilium to their clients as CNI option for their Managed Kubernetes clusters.

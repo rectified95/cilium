@@ -71,6 +71,7 @@ import (
 	policyAPI "github.com/cilium/cilium/pkg/policy/api"
 	"github.com/cilium/cilium/pkg/proxy"
 	"github.com/cilium/cilium/pkg/rate"
+	"github.com/cilium/cilium/pkg/redirectpolicy"
 	"github.com/cilium/cilium/pkg/resiliency"
 	"github.com/cilium/cilium/pkg/service"
 	serviceStore "github.com/cilium/cilium/pkg/service/store"
@@ -182,6 +183,8 @@ type Daemon struct {
 	orchestrator    datapath.Orchestrator
 	iptablesManager datapath.IptablesManager
 	hubble          hubblecell.HubbleIntegration
+
+	lrpManager *redirectpolicy.Manager
 }
 
 // GetPolicyRepository returns the policy repository of the daemon
@@ -394,6 +397,14 @@ func newDaemon(ctx context.Context, cleaner *daemonCleanup, params *daemonParams
 		orchestrator:      params.Orchestrator,
 		iptablesManager:   params.IPTablesManager,
 		hubble:            params.Hubble,
+		lrpManager:        params.LRPManager,
+	}
+
+	// initialize endpointRestoreComplete channel as soon as possible so that subsystems
+	// can wait on it to get closed and not block forever if they happen so start
+	// waiting when it is not yet initialized (which causes them to block forever).
+	if option.Config.RestoreState {
+		d.endpointRestoreComplete = make(chan struct{})
 	}
 
 	// Collect CIDR identities from the "old" bpf ipcache and restore them
@@ -533,12 +544,6 @@ func newDaemon(ctx context.Context, cleaner *daemonCleanup, params *daemonParams
 	restoredEndpoints, err := d.fetchOldEndpoints(option.Config.StateDir)
 	if err != nil {
 		log.WithError(err).Error("Unable to read existing endpoints")
-	}
-	// Restore all proxy ports from datapath, if possible
-	// Must be run before d.bootstrapFQDN(), which depends
-	// on the ports having been restored.
-	if d.l7Proxy != nil {
-		d.l7Proxy.RestoreProxyPorts()
 	}
 	bootstrapStats.restore.End(true)
 

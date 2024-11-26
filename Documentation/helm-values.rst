@@ -287,7 +287,7 @@
    * - :spelling:ignore:`bgpControlPlane`
      - This feature set enables virtual BGP routers to be created via CiliumBGPPeeringPolicy CRDs.
      - object
-     - ``{"enabled":false,"secretsNamespace":{"create":false,"name":"kube-system"}}``
+     - ``{"enabled":false,"secretsNamespace":{"create":false,"name":"kube-system"},"statusReport":{"enabled":true}}``
    * - :spelling:ignore:`bgpControlPlane.enabled`
      - Enables the BGP control plane.
      - bool
@@ -304,6 +304,14 @@
      - The name of the secret namespace to which Cilium agents are given read access
      - string
      - ``"kube-system"``
+   * - :spelling:ignore:`bgpControlPlane.statusReport`
+     - Status reporting settings (BGPv2 only)
+     - object
+     - ``{"enabled":true}``
+   * - :spelling:ignore:`bgpControlPlane.statusReport.enabled`
+     - Enable/Disable BGPv2 status reporting It is recommended to enable status reporting in general, but if you have any issue such as high API server load, you can disable it by setting this to false.
+     - bool
+     - ``true``
    * - :spelling:ignore:`bpf.authMapMax`
      - Configure the maximum number of entries in auth map.
      - int
@@ -1287,7 +1295,7 @@
    * - :spelling:ignore:`envoy.image`
      - Envoy container image.
      - object
-     - ``{"digest":"sha256:5738b0d3d9e570ef17b97b828bdf41332251073131f0ed4e19fac803910b07c1","override":null,"pullPolicy":"Always","repository":"quay.io/cilium/cilium-envoy","tag":"v1.30.7-1730965050-cd22d9ffa21eb4f214bf059bcc5d2f40f0c47882","useDigest":true}``
+     - ``{"digest":"sha256:f7901213136b1a03d6e8143a22f1f1a14ce8f3209cefd5d8b3c7cc07af7543af","override":null,"pullPolicy":"Always","repository":"quay.io/cilium/cilium-envoy","tag":"v1.31.3-1731891150-9a53218a187b032b9b841e1f910fc879502e9f1f","useDigest":true}``
    * - :spelling:ignore:`envoy.initialFetchTimeoutSeconds`
      - Time in seconds after which the initial fetch on an xDS stream is considered timed out
      - int
@@ -1667,11 +1675,23 @@
    * - :spelling:ignore:`hubble.metrics`
      - Hubble metrics configuration. See https://docs.cilium.io/en/stable/observability/metrics/#hubble-metrics for more comprehensive documentation about Hubble metrics.
      - object
-     - ``{"dashboards":{"annotations":{},"enabled":false,"label":"grafana_dashboard","labelValue":"1","namespace":null},"enableOpenMetrics":false,"enabled":null,"port":9965,"serviceAnnotations":{},"serviceMonitor":{"annotations":{},"enabled":false,"interval":"10s","jobLabel":"","labels":{},"metricRelabelings":null,"relabelings":[{"replacement":"${1}","sourceLabels":["__meta_kubernetes_pod_node_name"],"targetLabel":"node"}],"tlsConfig":{}},"tls":{"enabled":false,"server":{"cert":"","existingSecret":"","extraDnsNames":[],"extraIpAddresses":[],"key":"","mtls":{"enabled":false,"key":"ca.crt","name":null,"useSecret":false}}}}``
+     - ``{"dashboards":{"annotations":{},"enabled":false,"label":"grafana_dashboard","labelValue":"1","namespace":null},"dynamic":{"config":{"configMapName":"cilium-dynamic-metrics-config","content":[{"contextOptions":[],"excludeFilters":[],"includeFilters":[],"name":"all"}],"createConfigMap":true},"enabled":false},"enableOpenMetrics":false,"enabled":null,"port":9965,"serviceAnnotations":{},"serviceMonitor":{"annotations":{},"enabled":false,"interval":"10s","jobLabel":"","labels":{},"metricRelabelings":null,"relabelings":[{"replacement":"${1}","sourceLabels":["__meta_kubernetes_pod_node_name"],"targetLabel":"node"}],"tlsConfig":{}},"tls":{"enabled":false,"server":{"cert":"","existingSecret":"","extraDnsNames":[],"extraIpAddresses":[],"key":"","mtls":{"enabled":false,"key":"ca.crt","name":null,"useSecret":false}}}}``
    * - :spelling:ignore:`hubble.metrics.dashboards`
      - Grafana dashboards for hubble grafana can import dashboards based on the label and value ref: https://github.com/grafana/helm-charts/tree/main/charts/grafana#sidecar-for-dashboards
      - object
      - ``{"annotations":{},"enabled":false,"label":"grafana_dashboard","labelValue":"1","namespace":null}``
+   * - :spelling:ignore:`hubble.metrics.dynamic.config.configMapName`
+     - -- Name of configmap with configuration that may be altered to reconfigure metric handlers within a running agent.
+     - string
+     - ``"cilium-dynamic-metrics-config"``
+   * - :spelling:ignore:`hubble.metrics.dynamic.config.content`
+     - -- Exporters configuration in YAML format.
+     - list
+     - ``[{"contextOptions":[],"excludeFilters":[],"includeFilters":[],"name":"all"}]``
+   * - :spelling:ignore:`hubble.metrics.dynamic.config.createConfigMap`
+     - -- True if helm installer should create config map. Switch to false if you want to self maintain the file content.
+     - bool
+     - ``true``
    * - :spelling:ignore:`hubble.metrics.enableOpenMetrics`
      - Enables exporting hubble metrics in OpenMetrics format.
      - bool
@@ -3239,7 +3259,7 @@
    * - :spelling:ignore:`tls`
      - Configure TLS configuration in the agent.
      - object
-     - ``{"ca":{"cert":"","certValidityDuration":1095,"key":""},"caBundle":{"enabled":false,"key":"ca.crt","name":"cilium-root-ca.crt","useSecret":false},"secretSync":{"enabled":true,"secretsNamespace":{"create":true,"enabled":true,"name":"cilium-secrets"}},"secretsBackend":"local"}``
+     - ``{"ca":{"cert":"","certValidityDuration":1095,"key":""},"caBundle":{"enabled":false,"key":"ca.crt","name":"cilium-root-ca.crt","useSecret":false},"secretSync":{"enabled":true,"secretsNamespace":{"create":true,"name":"cilium-secrets"}},"secretsBackend":"local"}``
    * - :spelling:ignore:`tls.ca`
      - Base64 encoded PEM values for the CA certificate and private key. This can be used as common CA to generate certificates used by hubble and clustermesh components. It is neither required nor used when cert-manager is used to generate the certificates.
      - object
@@ -3279,7 +3299,7 @@
    * - :spelling:ignore:`tls.secretSync`
      - Configures settings for synchronization of TLS Interception Secrets
      - object
-     - ``{"enabled":true,"secretsNamespace":{"create":true,"enabled":true,"name":"cilium-secrets"}}``
+     - ``{"enabled":true,"secretsNamespace":{"create":true,"name":"cilium-secrets"}}``
    * - :spelling:ignore:`tls.secretSync.enabled`
      - Enable synchronization of Secrets for TLS Interception. If disabled and tls.secretsBackend is set to 'k8s', then secrets will be read directly by the agent.
      - bool
@@ -3287,13 +3307,9 @@
    * - :spelling:ignore:`tls.secretSync.secretsNamespace`
      - This configures secret synchronization for secrets used in CiliumNetworkPolicies
      - object
-     - ``{"create":true,"enabled":true,"name":"cilium-secrets"}``
+     - ``{"create":true,"name":"cilium-secrets"}``
    * - :spelling:ignore:`tls.secretSync.secretsNamespace.create`
      - Create secrets namespace for TLS Interception secrets.
-     - bool
-     - ``true``
-   * - :spelling:ignore:`tls.secretSync.secretsNamespace.enabled`
-     - Enable secret sync, which will make sure all TLS secrets used by TLS Interception are synced to secretsNamespace.name. If disabled, TLS secrets must be maintained externally.
      - bool
      - ``true``
    * - :spelling:ignore:`tls.secretSync.secretsNamespace.name`

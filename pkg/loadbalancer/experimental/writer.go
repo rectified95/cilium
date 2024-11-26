@@ -200,6 +200,9 @@ func (w *Writer) updateServiceReferences(txn WriteTxn, svc *Service) error {
 }
 
 func (w *Writer) newFrontend(txn statedb.ReadTxn, params FrontendParams, svc *Service) *Frontend {
+	if params.ServicePort == 0 {
+		params.ServicePort = params.Address.Port
+	}
 	fe := &Frontend{
 		FrontendParams: params,
 		service:        svc,
@@ -334,6 +337,7 @@ func (w *Writer) SetBackends(txn WriteTxn, name loadbalancer.ServiceName, source
 	if err != nil {
 		return err
 	}
+	refs = refs.Insert(name) // Even for empty bes, we need to refresh this service.
 
 	// Release orphaned backends, e.g. all backends from this source referencing this
 	// service.
