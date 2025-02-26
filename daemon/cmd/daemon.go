@@ -687,7 +687,7 @@ func newDaemon(ctx context.Context, cleaner *daemonCleanup, params *daemonParams
 
 		// Launch the K8s watchers in parallel as we continue to process other
 		// daemon options.
-		d.k8sWatcher.InitK8sSubsystem(d.ctx, params.CacheStatus)
+		d.k8sWatcher.InitK8sSubsystem(d.ctx, params.CacheStatus, watchers.ResourceGroups)
 		bootstrapStats.k8sInit.End(true)
 	} else {
 		close(params.CacheStatus)

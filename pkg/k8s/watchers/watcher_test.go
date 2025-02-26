@@ -44,7 +44,7 @@ func Test_No_Resources_InitK8sSubsystem(t *testing.T) {
 		&fakeK8sWatcherConfiguration{},
 	)
 
-	w.resourceGroupsFn = func(cfg WatcherConfiguration) (resourceGroups []string, waitForCachesOnly []string) {
+	resourceGroupsFn := func(cfg WatcherConfiguration) (resourceGroups []string, waitForCachesOnly []string) {
 		return []string{}, []string{}
 	}
 
@@ -54,7 +54,7 @@ func Test_No_Resources_InitK8sSubsystem(t *testing.T) {
 	defer cancel()
 
 	cachesSynced := make(chan struct{})
-	w.InitK8sSubsystem(ctx, cachesSynced)
+	w.InitK8sSubsystem(ctx, cachesSynced, resourceGroupsFn)
 	// Expect channel to be closed.
 	select {
 	case <-ctx.Done():

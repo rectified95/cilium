@@ -118,8 +118,6 @@ type ipcacheManager interface {
 }
 
 type K8sWatcher struct {
-	resourceGroupsFn func(cfg WatcherConfiguration) (resourceGroups, waitForCachesOnly []string)
-
 	clientset client.Clientset
 
 	k8sEventReporter          *K8sEventReporter
@@ -158,7 +156,6 @@ func newWatcher(
 	cfg WatcherConfiguration,
 ) *K8sWatcher {
 	return &K8sWatcher{
-		resourceGroupsFn:          resourceGroups,
 		clientset:                 clientset,
 		k8sEventReporter:          k8sEventReporter,
 		k8sPodWatcher:             k8sPodWatcher,
@@ -242,7 +239,7 @@ var ciliumResourceToGroupMapping = map[string]watcherInfo{
 
 // resourceGroups are all of the core Kubernetes and Cilium resource groups
 // which the Cilium agent watches to implement CNI functionality.
-func resourceGroups(cfg WatcherConfiguration) (resourceGroups, waitForCachesOnly []string) {
+func ResourceGroups(cfg WatcherConfiguration) (resourceGroups, waitForCachesOnly []string) {
 	k8sGroups := []string{
 		// To perform the service translation and have the BPF LB datapath
 		// with the right service -> backend (k8s endpoints) translation.
@@ -294,20 +291,8 @@ func resourceGroups(cfg WatcherConfiguration) (resourceGroups, waitForCachesOnly
 // The cachesSynced channel is closed when all caches are synchronized.
 // To be called after WaitForCRDsToRegister() so that all needed CRDs have
 // already been registered.
-func (k *K8sWatcher) InitK8sSubsystem(ctx context.Context, cachesSynced chan struct{}) {
-	resources, cachesOnly := k.resourceGroupsFn(k.cfg)
-	k._initK8sSubsystem(ctx, cachesSynced, resources, cachesOnly)
-}
-
-// InitK8sSubsystemWithResources takes a channel for which it will be closed when all
-// the resources are synchronized. Different from InitK8sSubsystem, this function
-// allows watcher to only sync the resources that are passed in.
-func (k *K8sWatcher) InitK8sSubsystemWithResources(ctx context.Context, cachesSynced chan struct{}, resources []string) {
-	k._initK8sSubsystem(ctx, cachesSynced, resources, nil)
-}
-
-// _initK8sSubsystem is a helper function to initialize the K8s subsystem.
-func (k *K8sWatcher) _initK8sSubsystem(ctx context.Context, cachesSynced chan struct{}, resources []string, cachesOnly []string) {
+func (k *K8sWatcher) InitK8sSubsystem(ctx context.Context, cachesSynced chan struct{}, resourceGroupsFn func(cfg WatcherConfiguration) (resourceGroups, waitForCachesOnly []string)) {
+	resources, cachesOnly := resourceGroupsFn(k.cfg)
 	log.Info("Enabling k8s event listener")
 	k.enableK8sWatchers(ctx, resources)
 	close(k.k8sPodWatcher.controllersStarted)
